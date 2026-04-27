@@ -1,0 +1,82 @@
+# Roundstone Level Crossing — Configuration
+# All berth IDs and timing parameters are configurable for recalibration.
+
+crossing:
+  name: "Roundstone Level Crossing"
+  network_rail_id: 1958
+  location:
+    lat: 50.816519
+    lon: -0.476006
+  road: "B2140 Roundstone Lane"
+  type: "MCB-CCTV"
+
+# Railway context
+railway:
+  line: "West Coastway"
+  elr: "BLI1"
+  line_speed_mph: 70
+  stations:
+    west:
+      name: "Angmering"
+      crs: "ANG"
+      tiploc: "ANGMRNG"
+      stanox: "87998"
+    east:
+      name: "Goring-by-Sea"
+      crs: "GOR"
+      tiploc: "GORNGBS"
+      stanox: "87997"
+
+# Train Describer configuration
+# TD area prefix for Sussex Coastway — confirm from OpenTrainTimes
+td:
+  area_id: "ES"
+
+  # Berth zones — trains stepping into these berths trigger state changes.
+  # Direction: "up" = towards London/Brighton (eastbound), "down" = towards Portsmouth (westbound)
+  # Populate these from OpenTrainTimes / SMART data once NROD access is live.
+  approach_berths:
+    up: []      # e.g., ["ES0931", "ES0613"]  — berths ~2-3 min before crossing
+    down: []    # e.g., ["ES0615", "ES0617"]
+
+  strike_in_berths:
+    up: []      # Berth where crossing closure sequence likely begins
+    down: []
+
+  at_crossing_berths:
+    up: []      # Berth(s) directly at/over the crossing
+    down: []
+
+  clear_berths:
+    up: []      # First berth after the crossing (train has passed)
+    down: []
+
+# Timing model — initial heuristics, refined by observed data
+timing:
+  # How long before the train arrives at the crossing do barriers typically lower?
+  # MCB-CCTV standard: signaller lowers ~120s before, but varies with practice.
+  pre_closure_secs: 120    # Initial estimate, will be calibrated
+  
+  # How long after the train clears does it take for barriers to raise?
+  post_clearance_secs: 15  # Signaller verifies clear via CCTV, then raises
+
+  # Minimum warning time per regulations (GK/RT0192)
+  min_warning_secs: 27
+
+  # If no TD/TRUST data for this long, mark state as STALE
+  stale_threshold_secs: 300
+
+# TRUST timing points near the crossing (for fallback when TD unavailable)
+trust:
+  timing_points:
+    - tiploc: "ANGMRNG"
+      direction: "up"
+      offset_secs: 90     # ~90s from Angmering departure to crossing (eastbound)
+    - tiploc: "GORNGBS"
+      direction: "down"
+      offset_secs: 120    # ~120s from Goring departure to crossing (westbound)
+
+# API server
+api:
+  host: "0.0.0.0"
+  port: 8590
