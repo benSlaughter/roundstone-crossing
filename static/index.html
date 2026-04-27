@@ -1,0 +1,821 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Roundstone Crossing</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #0f1117;
+      color: #e4e4e7;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 2rem 1rem;
+    }
+    h1 {
+      font-size: 1.1rem;
+      font-weight: 500;
+      color: #a1a1aa;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      margin-bottom: 1.5rem;
+    }
+
+    /* Main status card */
+    .status-card {
+      width: 100%;
+      max-width: 480px;
+      border-radius: 1rem;
+      padding: 2.5rem 2rem;
+      text-align: center;
+      margin-bottom: 1.5rem;
+      transition: background 0.6s ease;
+    }
+    .status-card.open { background: #052e16; border: 1px solid #166534; }
+    .status-card.closed_inferred { background: #450a0a; border: 1px solid #991b1b; }
+    .status-card.closing_predicted { background: #431407; border: 1px solid #9a3412; }
+    .status-card.opening_predicted { background: #1a2e05; border: 1px solid #4d7c0f; }
+    .status-card.stale_data, .status-card.unknown { background: #1c1917; border: 1px solid #44403c; }
+
+    .status-icon { font-size: 3.5rem; margin-bottom: 0.5rem; }
+    .status-label {
+      font-size: 1.8rem;
+      font-weight: 700;
+      margin-bottom: 0.25rem;
+    }
+    .status-sub {
+      font-size: 0.95rem;
+      color: #a1a1aa;
+    }
+    .status-eta {
+      margin-top: 1rem;
+      font-size: 1.1rem;
+      font-weight: 600;
+      color: #fbbf24;
+    }
+
+    /* Confidence bar */
+    .confidence {
+      margin-top: 1rem;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.5rem;
+      font-size: 0.8rem;
+      color: #71717a;
+    }
+    .confidence-bar {
+      width: 80px;
+      height: 4px;
+      background: #27272a;
+      border-radius: 2px;
+      overflow: hidden;
+    }
+    .confidence-fill {
+      height: 100%;
+      border-radius: 2px;
+      transition: width 0.4s ease;
+    }
+    .open .confidence-fill { background: #22c55e; }
+    .closed_inferred .confidence-fill { background: #ef4444; }
+    .closing_predicted .confidence-fill { background: #f97316; }
+    .opening_predicted .confidence-fill { background: #84cc16; }
+
+    /* Trains */
+    .section {
+      width: 100%;
+      max-width: 480px;
+      margin-bottom: 1.5rem;
+    }
+    .section-title {
+      font-size: 0.8rem;
+      font-weight: 600;
+      color: #71717a;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 0.5rem;
+    }
+    .train {
+      background: #18181b;
+      border: 1px solid #27272a;
+      border-radius: 0.5rem;
+      padding: 0.75rem 1rem;
+      margin-bottom: 0.5rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .train-hc {
+      font-family: "SF Mono", "Fira Code", monospace;
+      font-weight: 700;
+      font-size: 1rem;
+    }
+    .train-info {
+      font-size: 0.85rem;
+      color: #a1a1aa;
+    }
+    .phase-badge {
+      font-size: 0.7rem;
+      padding: 0.2rem 0.5rem;
+      border-radius: 0.25rem;
+      font-weight: 600;
+      text-transform: uppercase;
+    }
+    .phase-approaching { background: #422006; color: #fb923c; }
+    .phase-strike_in { background: #450a0a; color: #fca5a5; }
+    .phase-at_crossing { background: #7f1d1d; color: #fef2f2; }
+    .phase-at_station { background: #1a2e05; color: #d9f99d; }
+
+    /* Recent trains */
+    .recent-train {
+      background: #18181b;
+      border: 1px solid #27272a;
+      border-radius: 0.5rem;
+      padding: 0.6rem 1rem;
+      margin-bottom: 0.4rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 0.85rem;
+    }
+    .recent-train-hc {
+      font-family: "SF Mono", "Fira Code", monospace;
+      font-weight: 700;
+    }
+    .recent-train-dir {
+      color: #a1a1aa;
+      margin-left: 0.5rem;
+    }
+    .recent-train-time {
+      color: #71717a;
+      font-size: 0.8rem;
+    }
+
+    /* History */
+    .history-item {
+      background: #18181b;
+      border: 1px solid #27272a;
+      border-radius: 0.5rem;
+      padding: 0.6rem 1rem;
+      margin-bottom: 0.4rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 0.85rem;
+    }
+    .history-state { font-weight: 600; }
+    .history-time { color: #71717a; font-size: 0.8rem; }
+    .history-duration { color: #a1a1aa; }
+
+    .empty { color: #52525b; font-style: italic; font-size: 0.9rem; padding: 1rem 0; }
+
+    .pulse {
+      display: inline-block;
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: #22c55e;
+      margin-right: 0.5rem;
+      animation: pulse 2s infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.3; }
+    }
+    .disconnected .pulse { background: #ef4444; animation: none; }
+
+    footer {
+      margin-top: auto;
+      padding-top: 2rem;
+      font-size: 0.75rem;
+      color: #3f3f46;
+    }
+
+    /* Legend */
+    .legend-toggle {
+      width: 100%;
+      max-width: 480px;
+      margin-bottom: 1.5rem;
+      text-align: right;
+    }
+    .legend-toggle button {
+      background: none;
+      border: 1px solid #27272a;
+      border-radius: 0.5rem;
+      color: #71717a;
+      font-size: 0.75rem;
+      padding: 0.3rem 0.6rem;
+      cursor: pointer;
+    }
+    .legend-toggle button:hover { color: #e4e4e7; border-color: #3f3f46; }
+    .legend-panel {
+      display: none;
+      width: 100%;
+      max-width: 480px;
+      background: #18181b;
+      border: 1px solid #27272a;
+      border-radius: 0.75rem;
+      padding: 1rem 1.25rem;
+      margin-bottom: 1.5rem;
+      font-size: 0.82rem;
+      line-height: 1.7;
+    }
+    .legend-panel.visible { display: block; }
+    .legend-panel dt {
+      font-weight: 700;
+      color: #e4e4e7;
+      margin-top: 0.4rem;
+    }
+    .legend-panel dt:first-child { margin-top: 0; }
+    .legend-panel dd {
+      color: #a1a1aa;
+      margin-left: 0;
+      margin-bottom: 0.25rem;
+    }
+    .legend-section {
+      font-size: 0.7rem;
+      font-weight: 600;
+      color: #52525b;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-top: 0.8rem;
+      margin-bottom: 0.2rem;
+      padding-top: 0.5rem;
+      border-top: 1px solid #27272a;
+    }
+    .legend-section:first-child { border-top: none; margin-top: 0; padding-top: 0; }
+
+    /* Track schematic */
+    .schematic {
+      width: 100%;
+      max-width: 600px;
+      background: #18181b;
+      border: 1px solid #27272a;
+      border-radius: 0.75rem;
+      padding: 1.25rem 1rem 1rem;
+      margin-bottom: 1.5rem;
+    }
+    .schematic-title {
+      font-size: 0.8rem;
+      font-weight: 600;
+      color: #71717a;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 0.75rem;
+    }
+    .track-area {
+      position: relative;
+      height: 120px;
+    }
+    /* Track lines — full width */
+    .track-line {
+      position: absolute;
+      height: 3px;
+      background: #3f3f46;
+      left: 0;
+      right: 0;
+      z-index: 1;
+    }
+    .track-up { top: 35px; }
+    .track-down { top: 82px; }
+    /* Direction arrows */
+    .track-arrow {
+      position: absolute;
+      font-size: 0.55rem;
+      color: #52525b;
+      z-index: 3;
+    }
+    .arrow-up { top: 43px; right: 2px; }
+    .arrow-down { top: 71px; left: 2px; }
+    /* Hide arrows when berths are shown (they overlap) */
+    .track-area.show-berths .track-arrow { display: none; }
+    /* Station boxes — positioned inline on tracks */
+    .station {
+      position: absolute;
+      top: 16px;
+      width: 60px;
+      height: 88px;
+      border: 1px dashed #3f3f46;
+      border-radius: 4px;
+      background: rgba(28, 25, 23, 0.85);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: space-between;
+      padding: 3px 2px;
+      z-index: 2;
+      transform: translateX(-50%);
+    }
+    .station-name {
+      font-size: 0.55rem;
+      font-weight: 700;
+      color: #a1a1aa;
+      text-transform: uppercase;
+      letter-spacing: 0.02em;
+    }
+    .station-plats {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      flex: 1;
+      justify-content: center;
+      gap: 18px;
+    }
+    .station-plat {
+      font-size: 0.45rem;
+      color: #52525b;
+    }
+    /* Crossing marker — positioned at correct % */
+    .crossing-marker {
+      position: absolute;
+      transform: translateX(-50%);
+      top: 0;
+      bottom: 0;
+      width: 30px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      z-index: 4;
+    }
+    .crossing-road {
+      position: absolute;
+      top: 20px;
+      bottom: 20px;
+      width: 10px;
+      background: repeating-linear-gradient(
+        180deg,
+        #44403c 0px, #44403c 3px,
+        transparent 3px, transparent 6px
+      );
+      border-radius: 2px;
+      opacity: 0.5;
+    }
+    .crossing-light {
+      width: 20px;
+      height: 20px;
+      border-radius: 50%;
+      border: 2px solid #27272a;
+      z-index: 5;
+      transition: background 0.5s ease, box-shadow 0.5s ease;
+    }
+    .crossing-light.open { background: #22c55e; box-shadow: 0 0 8px #22c55e88; }
+    .crossing-light.closed_inferred { background: #ef4444; box-shadow: 0 0 8px #ef444488; }
+    .crossing-light.closing_predicted { background: #f97316; box-shadow: 0 0 8px #f9731688; }
+    .crossing-light.opening_predicted { background: #84cc16; box-shadow: 0 0 8px #84cc1688; }
+    .crossing-light.unknown, .crossing-light.stale_data { background: #52525b; }
+    .crossing-label {
+      font-size: 0.5rem;
+      color: #71717a;
+      margin-top: 2px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      z-index: 5;
+    }
+    /* Berth tick marks */
+    .berth-tick {
+      position: absolute;
+      width: 1px;
+      height: 5px;
+      background: #3f3f46;
+      z-index: 2;
+      transform: translateX(-50%);
+    }
+    .berth-tick.up { top: 32px; }
+    .berth-tick.down { top: 83px; }
+    .berth-tick.station-tick {
+      width: 2px;
+      height: 7px;
+      background: #a78bfa;
+    }
+    .berth-label {
+      position: absolute;
+      font-size: 0.4rem;
+      color: #3f3f46;
+      transform: translateX(-50%);
+      z-index: 2;
+      font-family: "SF Mono", "Fira Code", monospace;
+    }
+    .berth-label.up { top: 47px; }
+    .berth-label.down { top: 65px; }
+    /* Berth labels hidden by default, shown when .show-berths is on track-area */
+    .berth-label { display: none; }
+    .track-area.show-berths .berth-label { display: block; }
+    /* Station tick labels hidden by default, shown with berths */
+    .station-tick-label { color: #a78bfa; font-size: 0.45rem; }
+    /* Toggle button in schematic title */
+    .berth-toggle {
+      background: none;
+      border: 1px solid #27272a;
+      border-radius: 0.5rem;
+      color: #71717a;
+      font-size: 0.65rem;
+      padding: 0.2rem 0.5rem;
+      cursor: pointer;
+      margin-left: 0.5rem;
+      vertical-align: middle;
+    }
+    .berth-toggle:hover { color: #e4e4e7; border-color: #3f3f46; }
+    /* Train indicators on track */
+    .track-train {
+      position: absolute;
+      height: 18px;
+      border-radius: 3px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-family: "SF Mono", "Fira Code", monospace;
+      font-size: 0.6rem;
+      font-weight: 700;
+      color: #fff;
+      z-index: 6;
+      transition: left 1s ease, background 0.3s ease;
+      white-space: nowrap;
+      padding: 0 4px;
+      min-width: 36px;
+      transform: translateX(-50%);
+    }
+    .track-train.up { top: 26px; }
+    .track-train.down { top: 73px; }
+    .track-train.phase-approaching { background: #92400e; }
+    .track-train.phase-strike_in { background: #991b1b; }
+    .track-train.phase-at_crossing { background: #dc2626; }
+    .track-train.phase-at_station { background: #4d7c0f; }
+    .track-train.phase-cleared { background: #1e3a5f; opacity: 0.6; }
+  </style>
+</head>
+<body>
+  <h1>Roundstone Crossing</h1>
+
+  <div id="status-card" class="status-card unknown">
+    <div class="status-icon" id="status-icon">⏳</div>
+    <div class="status-label" id="status-label">Loading…</div>
+    <div class="status-sub" id="status-sub"></div>
+    <div class="status-eta" id="status-eta"></div>
+    <div class="confidence">
+      <span id="confidence-text">—</span>
+      <div class="confidence-bar">
+        <div class="confidence-fill" id="confidence-fill" style="width: 0%"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="legend-toggle">
+    <button onclick="document.getElementById('legend').classList.toggle('visible')">ℹ Legend</button>
+  </div>
+  <div class="legend-panel" id="legend">
+    <dl>
+      <div class="legend-section">Train phases</div>
+      <dt>Approaching</dt>
+      <dd>Train detected 1–2 stations away, heading towards the crossing</dd>
+      <dt>Strike in</dt>
+      <dd>Train at the nearest station — barrier closure is likely imminent</dd>
+      <dt>At crossing</dt>
+      <dd>Train is in the track section over the crossing — barriers are down</dd>
+      <dt>Cleared</dt>
+      <dd>Train has passed the crossing and reached the next station</dd>
+      <dt>At station</dt>
+      <dd>Train reported at Angmering or Goring by TRUST data (may not have berth-level position)</dd>
+      <div class="legend-section">Crossing states</div>
+      <dt>🟢 Open</dt>
+      <dd>No trains near the crossing — barriers are up, road is clear</dd>
+      <dt>🟡 Closing Soon</dt>
+      <dd>Train approaching — barriers expected to lower shortly</dd>
+      <dt>🔴 Closed</dt>
+      <dd>Train at the crossing — barriers are inferred to be down</dd>
+      <dt>🟡 Opening Soon</dt>
+      <dd>Train clearing — barriers expected to raise shortly</dd>
+      <div class="legend-section">Directions</div>
+      <dt>↗ East</dt>
+      <dd>Towards Goring-by-Sea, Worthing, Brighton (up line)</dd>
+      <dt>↙ West</dt>
+      <dd>Towards Angmering, Littlehampton, Portsmouth (down line)</dd>
+    </dl>
+  </div>
+
+  <div class="schematic">
+    <div class="schematic-title">Track Diagram
+      <button class="berth-toggle" onclick="document.getElementById('track-area').classList.toggle('show-berths')">Berths</button>
+    </div>
+    <div class="track-area" id="track-area">
+      <!-- Track lines (full width) -->
+      <div class="track-line track-up"></div>
+      <div class="track-line track-down"></div>
+      <!-- Direction arrows -->
+      <div class="track-arrow arrow-up">East →</div>
+      <div class="track-arrow arrow-down">← West</div>
+      <!-- Angmering station (~17% from left) -->
+      <div class="station" style="left: 17%;">
+        <div class="station-name">Angmering</div>
+      </div>
+      <!-- Goring station (~83% from left) -->
+      <div class="station" style="left: 83%;">
+        <div class="station-name">Goring</div>
+      </div>
+      <!-- Crossing (~27% — just east of Angmering) -->
+      <div class="crossing-marker" style="left: 32%;">
+        <div class="crossing-road"></div>
+        <div class="crossing-light unknown" id="crossing-light"></div>
+        <div class="crossing-label">Crossing</div>
+      </div>
+      <!-- Berth ticks rendered by JS -->
+      <!-- Trains rendered by JS -->
+    </div>
+  </div>
+
+  <div class="section" id="trains-section" style="display:none">
+    <div class="section-title">Active Trains</div>
+    <div id="trains-list"></div>
+  </div>
+
+  <div class="section">
+    <div class="section-title">Recent Trains</div>
+    <div id="recent-trains-list"><div class="empty">Loading…</div></div>
+  </div>
+
+  <div class="section">
+    <div class="section-title">Recent History</div>
+    <div id="history-list"><div class="empty">Loading…</div></div>
+  </div>
+
+  <footer><span class="pulse" id="pulse"></span><span id="footer-text">Connecting…</span></footer>
+
+  <script>
+    const STATE_CONFIG = {
+      open:               { icon: '🟢', label: 'Open',              sub: 'Barriers are up — road is clear' },
+      closing_predicted:  { icon: '🟡', label: 'Closing Soon',      sub: 'Train approaching — barriers expected to lower' },
+      closed_inferred:    { icon: '🔴', label: 'Closed',            sub: 'Train at crossing — barriers are down' },
+      opening_predicted:  { icon: '🟡', label: 'Opening Soon',      sub: 'Train clearing — barriers expected to raise' },
+      stale_data:         { icon: '⚠️', label: 'No Data',           sub: 'Feed connection lost — status unknown' },
+      unknown:            { icon: '❓', label: 'Unknown',            sub: 'Waiting for data…' },
+    };
+
+    const DIRECTION_LABELS = { up: '↗ East', down: '↙ West' };
+
+    function formatDuration(secs) {
+      if (secs == null) return '';
+      if (secs < 60) return `${Math.round(secs)}s`;
+      const m = Math.floor(secs / 60);
+      const s = Math.round(secs % 60);
+      return s > 0 ? `${m}m ${s}s` : `${m}m`;
+    }
+
+    function formatTime(iso) {
+      if (!iso) return '';
+      const d = new Date(iso);
+      return d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    }
+
+    async function fetchJSON(url) {
+      const r = await fetch(url);
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      return r.json();
+    }
+
+    // Berth positions on the schematic (percentage from left edge)
+    // Real geography: Angmering (west, ~14%) — CROSSING (~27%) — Goring (east, ~86%)
+    // Crossing is ~400m east of Angmering, ~2.5km west of Goring.
+    const BERTH_POSITIONS = {
+      // Eastbound (up) berths — west to east
+      'A027': 2,    // far west approach
+      '0040': 4,    // west of Angmering
+      '0038': 8,    // west of Angmering P1 (entry side for eastbound)
+      '0036': 45,   // just past crossing (eastbound)
+      '0034': 70,   // between crossing and Goring
+      '0032': 75,   // west of Goring (entry side for eastbound)
+      '0030': 97,   // far east of Goring
+      // Westbound (down) berths — east to west
+      '0033': 97,   // far east of Goring
+      '0035': 93,   // east of Goring P2 (entry side for westbound)
+      '0037': 55,   // between crossing and Goring
+      '0039': 39,   // approaching crossing (westbound)
+      '0041': 25,   // east of Angmering P2 (entry side for westbound)
+    };
+
+    // Which line (up=P1/top, down=P2/bottom) each berth belongs to
+    const BERTH_LINE = {
+      '0040': 'up', '0038': 'up',
+      '0036': 'up', '0034': 'up', '0032': 'up', '0030': 'up',
+      'A027': 'down',
+      '0033': 'down', '0035': 'down', '0037': 'down',
+      '0039': 'down', '0041': 'down',
+    };
+
+    // Station positions for AT_STATION trains
+    const STATION_POSITIONS = {
+      'Angmering': { up: 17, down: 17 },
+      'Goring':    { up: 83, down: 83 },
+    };
+
+    // Station berth sub-positions — entry vs at_platform positions (% from left)
+    const STATION_BERTH_POSITIONS = {
+      '0038': { entry: 8, at_platform: 17 },    // Eastbound Angmering P1
+      '0041': { entry: 25, at_platform: 17 },   // Westbound Angmering P2
+      '0032': { entry: 75, at_platform: 83 },   // Eastbound Goring P1
+      '0035': { entry: 93, at_platform: 83 },   // Westbound Goring P2
+    };
+
+    // Render berth tick marks (once on load)
+    function renderBerthTicks() {
+      const area = document.getElementById('track-area');
+      for (const [berth, pct] of Object.entries(BERTH_POSITIONS)) {
+        const line = BERTH_LINE[berth] || 'up';
+        // Tick mark
+        const tick = document.createElement('div');
+        tick.className = `berth-tick ${line}`;
+        tick.style.left = pct + '%';
+        area.appendChild(tick);
+        // Label (hidden by default, toggled via .show-berths)
+        const label = document.createElement('div');
+        label.className = `berth-label ${line}`;
+        label.style.left = pct + '%';
+        label.textContent = berth;
+        area.appendChild(label);
+      }
+      // Station ticks — show where AT_STATION trains display
+      for (const [name, pos] of Object.entries(STATION_POSITIONS)) {
+        for (const line of ['up', 'down']) {
+          const tick = document.createElement('div');
+          tick.className = `berth-tick station-tick ${line}`;
+          tick.style.left = pos[line] + '%';
+          area.appendChild(tick);
+          const label = document.createElement('div');
+          label.className = `berth-label station-tick-label ${line}`;
+          label.style.left = pos[line] + '%';
+          label.textContent = line === 'up' ? 'P1' : 'P2';
+          area.appendChild(label);
+        }
+      }
+    }
+    renderBerthTicks();
+
+    async function updateDiagram() {
+      try {
+        const data = await fetchJSON('/diagram');
+
+        // Update crossing light
+        const light = document.getElementById('crossing-light');
+        light.className = 'crossing-light ' + data.state;
+
+        // Render trains on track
+        const area = document.getElementById('track-area');
+        area.querySelectorAll('.track-train').forEach(el => el.remove());
+
+        for (const t of data.trains) {
+          let pct, line;
+          const berth = t.last_berth;
+
+          if (berth && STATION_BERTH_POSITIONS[berth] && t.sub_position) {
+            // Station berth with sub-position — use entry or at_platform position
+            const sp = STATION_BERTH_POSITIONS[berth];
+            pct = sp[t.sub_position] ?? sp.entry;
+            line = t.direction || BERTH_LINE[berth] || 'up';
+          } else if (t.phase === 'at_station' && t.station && STATION_POSITIONS[t.station]) {
+            // Fallback: at_station without station berth info
+            line = t.direction || 'up';
+            pct = STATION_POSITIONS[t.station][line] || STATION_POSITIONS[t.station].up;
+          } else {
+            // Position from berth
+            if (!berth || !(berth in BERTH_POSITIONS)) continue;
+            pct = BERTH_POSITIONS[berth];
+            line = t.direction || BERTH_LINE[berth] || 'up';
+          }
+
+          const el = document.createElement('div');
+          el.className = `track-train ${line} phase-${t.phase}`;
+          el.style.left = pct + '%';
+          el.textContent = t.headcode;
+          area.appendChild(el);
+        }
+      } catch (e) { /* ignore */ }
+    }
+
+    async function updateStatus() {
+      try {
+        const data = await fetchJSON('/status');
+        const cfg = STATE_CONFIG[data.state] || STATE_CONFIG.unknown;
+
+        const card = document.getElementById('status-card');
+        card.className = 'status-card ' + data.state;
+
+        document.getElementById('status-icon').textContent = cfg.icon;
+        document.getElementById('status-label').textContent = cfg.label;
+        document.getElementById('status-sub').textContent = cfg.sub;
+
+        // ETA
+        const eta = document.getElementById('status-eta');
+        if (data.seconds_until_change != null && data.seconds_until_change > 0) {
+          const nextLabel = STATE_CONFIG[data.predicted_next_state]?.label || '';
+          eta.textContent = `${nextLabel} in ~${formatDuration(data.seconds_until_change)}`;
+        } else {
+          eta.textContent = '';
+        }
+
+        // Confidence
+        const pct = Math.round(data.confidence * 100);
+        document.getElementById('confidence-text').textContent = `${pct}% confidence`;
+        document.getElementById('confidence-fill').style.width = `${pct}%`;
+
+        // Trains
+        const trainsSection = document.getElementById('trains-section');
+        const trainsList = document.getElementById('trains-list');
+        if (data.active_trains && data.active_trains.length > 0) {
+          trainsSection.style.display = '';
+          trainsList.innerHTML = data.active_trains.map(t => `
+            <div class="train">
+              <div>
+                <span class="train-hc">${t.headcode}</span>
+                <span class="train-info">${DIRECTION_LABELS[t.direction] || '?'}</span>
+              </div>
+              <span class="phase-badge phase-${t.phase}">${t.phase.replace('_', ' ')}</span>
+            </div>
+          `).join('');
+        } else {
+          trainsSection.style.display = 'none';
+        }
+
+        document.getElementById('footer-text').textContent =
+          `Live · updated ${formatTime(new Date().toISOString())}`;
+        document.querySelector('footer').classList.remove('disconnected');
+
+      } catch (e) {
+        document.getElementById('footer-text').textContent = 'Disconnected';
+        document.querySelector('footer').classList.add('disconnected');
+      }
+    }
+
+    async function updateRecentTrains() {
+      try {
+        const data = await fetchJSON('/history?type=passages&limit=20');
+        const list = document.getElementById('recent-trains-list');
+        if (!data.passages || data.passages.length === 0) {
+          list.innerHTML = '<div class="empty">No trains recorded yet</div>';
+          return;
+        }
+        // Deduplicate by headcode+direction+observed_at_crossing (the earlier bug logged duplicates)
+        const seen = new Set();
+        const unique = data.passages.filter(p => {
+          const key = `${p.headcode}-${p.direction}-${p.observed_at_crossing}`;
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        }).slice(0, 5);
+
+        list.innerHTML = unique.map(p => {
+          const dir = DIRECTION_LABELS[p.direction] || '?';
+          const time = formatTime(p.observed_clear || p.observed_at_crossing);
+          return `
+            <div class="recent-train">
+              <div>
+                <span class="recent-train-hc">${p.headcode}</span>
+                <span class="recent-train-dir">${dir}</span>
+              </div>
+              <span class="recent-train-time">${time}</span>
+            </div>
+          `;
+        }).join('');
+      } catch (e) { /* ignore */ }
+    }
+
+    async function updateHistory() {
+      try {
+        const data = await fetchJSON('/history?limit=8');
+        const list = document.getElementById('history-list');
+        if (!data.intervals || data.intervals.length === 0) {
+          list.innerHTML = '<div class="empty">No history yet</div>';
+          return;
+        }
+        list.innerHTML = data.intervals.map(iv => {
+          const cfg = STATE_CONFIG[iv.state] || {};
+          const dur = iv.duration_secs ? formatDuration(iv.duration_secs) : 'ongoing';
+          return `
+            <div class="history-item">
+              <div>
+                <span>${cfg.icon || '?'}</span>
+                <span class="history-state">${cfg.label || iv.state}</span>
+                <span class="history-duration">· ${dur}</span>
+              </div>
+              <span class="history-time">${formatTime(iv.started_at)}</span>
+            </div>
+          `;
+        }).join('');
+      } catch (e) { /* ignore */ }
+    }
+
+    // Initial load
+    updateStatus();
+    updateDiagram();
+    updateRecentTrains();
+    updateHistory();
+
+    // Poll every 3 seconds for status + diagram, every 15 for history/trains
+    setInterval(updateStatus, 3000);
+    setInterval(updateDiagram, 3000);
+    setInterval(updateRecentTrains, 15000);
+    setInterval(updateHistory, 15000);
+  </script>
+</body>
+</html>

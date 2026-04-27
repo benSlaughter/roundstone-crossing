@@ -59,9 +59,9 @@ NROD STOMP Feeds (TD + TRUST)
 - Python 3.12 venv with all deps
 
 ### ❌ What's NOT Done (blockers for first run)
-1. **No NROD account yet** — need to register at https://publicdatafeeds.networkrail.co.uk
-2. **No berth zones mapped** — config.yaml berth arrays are empty. Need to use OpenTrainTimes (https://www.opentraintimes.com/maps) to identify which TD berths (prefix "ES") are near the crossing
-3. **No SMART/CORPUS data downloaded** — these static datasets map berths to physical locations
+1. ~~**No NROD account yet**~~ — ✅ Registered
+2. ~~**No berth zones mapped**~~ — ✅ Mapped from SMART data (TD area is **LA**, not ES)
+3. ~~**No SMART/CORPUS data downloaded**~~ — ✅ Downloaded to `data/`
 
 ### Detailed TODO
 See `docs/TODO.md` for the full prioritised task list.

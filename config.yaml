@@ -28,28 +28,33 @@ railway:
       stanox: "87997"
 
 # Train Describer configuration
-# TD area prefix for Sussex Coastway — confirm from OpenTrainTimes
+# TD area: LA (covers Brighton–Littlehampton coastway, confirmed from SMART data)
 td:
-  area_id: "ES"
+  area_id: "LA"
 
   # Berth zones — trains stepping into these berths trigger state changes.
   # Direction: "up" = towards London/Brighton (eastbound), "down" = towards Portsmouth (westbound)
-  # Populate these from OpenTrainTimes / SMART data once NROD access is live.
+  #
+  # Crossing location (verified from OpenTrainTimes SVG signalling diagram):
+  #   Eastbound: just after signal 38, at the start of berth 0036
+  #   Westbound: just after signal 39, at the start of berth 0041
+  #   Berth 0041 is long — it covers both the crossing AND Angmering P2 platform.
+  #
   approach_berths:
-    up: []      # e.g., ["ES0931", "ES0613"]  — berths ~2-3 min before crossing
-    down: []    # e.g., ["ES0615", "ES0617"]
+    up: ["A027"]                        # Beyond Angmering west (heading east towards crossing)
+    down: ["0033"]                      # Far east of Goring (heading west towards crossing)
 
   strike_in_berths:
-    up: []      # Berth where crossing closure sequence likely begins
-    down: []
+    up: ["0040", "0038"]                # Angmering P1 arrival + departure (heading east)
+    down: ["0035", "0037", "0039"]      # Goring P2 through to approaching crossing
 
   at_crossing_berths:
-    up: []      # Berth(s) directly at/over the crossing
-    down: []
+    up: ["0036"]                        # Just past signal 38 — crossing at start of this berth
+    down: ["0041"]                      # Just past signal 39 — crossing at start of this berth
 
   clear_berths:
-    up: []      # First berth after the crossing (train has passed)
-    down: []
+    up: ["0034"]                        # Past crossing, approaching Goring P1
+    down: ["A027"]                      # Past crossing + Angmering P2, departed westward
 
 # Timing model — initial heuristics, refined by observed data
 timing:
@@ -69,12 +74,74 @@ timing:
 # TRUST timing points near the crossing (for fallback when TD unavailable)
 trust:
   timing_points:
+    # Departure events — used for crossing time estimation
     - tiploc: "ANGMRNG"
+      stanox: "87998"
       direction: "up"
+      event: "departure"
+      action: "predict"
       offset_secs: 90     # ~90s from Angmering departure to crossing (eastbound)
     - tiploc: "GORNGBS"
+      stanox: "87997"
       direction: "down"
+      event: "departure"
+      action: "predict"
       offset_secs: 120    # ~120s from Goring departure to crossing (westbound)
+
+    # Arrival events — used to show trains at stations
+    - tiploc: "ANGMRNG"
+      stanox: "87998"
+      direction: "up"
+      event: "arrival"
+      action: "at_station"
+      station: "Angmering"
+    - tiploc: "ANGMRNG"
+      stanox: "87998"
+      direction: "down"
+      event: "arrival"
+      action: "clear"       # Westbound arrival at Angmering P2 = past the crossing
+      station: "Angmering"
+    - tiploc: "GORNGBS"
+      stanox: "87997"
+      direction: "up"
+      event: "arrival"
+      action: "at_station"
+      station: "Goring"
+    - tiploc: "GORNGBS"
+      stanox: "87997"
+      direction: "down"
+      event: "arrival"
+      action: "at_station"
+      station: "Goring"
+
+# Station berths — berths that straddle a station platform
+# Each maps to a station name + sub-positions (% from left on diagram)
+station_berths:
+  "0038":
+    station: "Angmering"
+    direction: "up"
+    entry: 8       # west side (train enters from west)
+    platform: 17   # at station
+  "0041":
+    station: "Angmering"
+    direction: "down"
+    entry: 25      # east side (train enters from crossing)
+    platform: 17   # at station
+  "0032":
+    station: "Goring"
+    direction: "up"
+    entry: 75      # west side (train enters from west)
+    platform: 83   # at station
+  "0035":
+    station: "Goring"
+    direction: "down"
+    entry: 93      # east side (train enters from east)
+    platform: 83   # at station
+
+# Realtime Trains API — platform-level station data
+rtt:
+  stations: ["ANG", "GBS"]    # CRS codes to poll (ANG=Angmering, GBS=Goring-by-Sea)
+  poll_interval: 15            # seconds between poll cycles
 
 # API server
 api:

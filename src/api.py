@@ -3,20 +3,55 @@ API server — exposes crossing status, predictions, and history.
 """
 
 from datetime import datetime
+from pathlib import Path
 
 from fastapi import FastAPI, Query
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 
 from .inferrer import CrossingInferrer
 from .history import HistoryLogger
+from .tracker import TrainTracker
+
+STATIC_DIR = Path(__file__).parent.parent / "static"
 
 
-def create_app(inferrer: CrossingInferrer, history: HistoryLogger) -> FastAPI:
+def create_app(tracker: TrainTracker, inferrer: CrossingInferrer, history: HistoryLogger) -> FastAPI:
     app = FastAPI(title="Roundstone Crossing Predictor")
+
+    @app.get("/")
+    async def dashboard():
+        """Serve the web dashboard."""
+        return FileResponse(STATIC_DIR / "index.html")
 
     @app.get("/status")
     async def status():
         """Current inferred crossing state."""
         return inferrer.status.to_dict()
+
+    @app.get("/diagram")
+    async def diagram():
+        """All tracked trains with berth positions for the schematic diagram."""
+        from .models import TrainPhase
+        trains = []
+        for hc, t in tracker.trains.items():
+            if t.phase in (TrainPhase.LOST, TrainPhase.CLEARED):
+                continue
+            trains.append({
+                "headcode": t.headcode,
+                "direction": t.direction.value if t.direction else None,
+                "phase": t.phase.value,
+                "last_berth": t.last_berth,
+                "station": t.station,
+                "sub_position": t.sub_position,
+                "confidence": round(t.confidence, 2),
+                "age_secs": round(t.age_secs),
+            })
+        return {
+            "state": inferrer.status.state.value,
+            "confidence": round(inferrer.status.confidence, 2),
+            "trains": trains,
+        }
 
     @app.get("/predictions")
     async def predictions():

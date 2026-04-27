@@ -2,21 +2,20 @@
 
 ## 🔴 Before First Run (blockers)
 
-- [ ] **Register for NROD access** — https://publicdatafeeds.networkrail.co.uk
+- [x] **Register for NROD access** — https://publicdatafeeds.networkrail.co.uk
   - Create account, get username/password
   - Add credentials to `.env` (copy from `.env.example`)
   - Note: limited to 1,000 users, first-come-first-served
 
-- [ ] **Map TD berths near Roundstone crossing**
-  - Go to https://www.opentraintimes.com/maps and find the Angmering area
-  - Identify berth IDs for the "ES" TD area between Goring-by-Sea and Angmering
-  - Categorise each berth into: approach / strike_in / at_crossing / clear (for both up and down directions)
-  - Populate `config.yaml` berth zone arrays
+- [x] **Map TD berths near Roundstone crossing**
+  - TD area is **LA** (not ES as initially assumed) — confirmed from SMART data
+  - Berths mapped: 0032-0035 (Goring), 0036-0037 (crossing zone), 0038-0041 (Angmering)
+  - Populated `config.yaml` berth zone arrays for both directions
+  - Scripts: `scripts/download_reference_data.py`, `scripts/find_berths.py`
 
-- [ ] **Download SMART data** from NROD portal
-  - This maps TD berths to physical locations (mileages, timing points)
-  - Use it to confirm which berths are near the crossing
-  - Also download CORPUS data (location reference)
+- [x] **Download SMART data** from NROD portal
+  - SMART and CORPUS data downloaded to `data/` directory
+  - Used to confirm berth-to-location mapping near the crossing
 
 ## 🟡 Early Improvements (once running)
 

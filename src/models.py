@@ -28,6 +28,7 @@ class TrainPhase(str, Enum):
     STRIKE_IN = "strike_in"         # In strike-in zone (closure likely imminent)
     AT_CROSSING = "at_crossing"     # At or over the crossing
     CLEARED = "cleared"             # Past the crossing
+    AT_STATION = "at_station"       # At Angmering or Goring (confirmed by RTT)
     LOST = "lost"                   # No updates for too long
 
 
@@ -44,6 +45,8 @@ class TrackedTrain:
     last_update: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     predicted_at_crossing: Optional[datetime] = None
     confidence: float = 0.5                # 0.0 = guess, 1.0 = certain
+    station: Optional[str] = None          # Station name if AT_STATION
+    sub_position: Optional[str] = None     # "entry" or "at_platform" within station berths
 
     @property
     def age_secs(self) -> float:
@@ -86,6 +89,7 @@ class CrossingStatus:
                     "direction": t.direction.value if t.direction else None,
                     "phase": t.phase.value,
                     "last_berth": t.last_berth,
+                    "station": t.station,
                     "confidence": round(t.confidence, 2),
                 }
                 for t in self.active_trains

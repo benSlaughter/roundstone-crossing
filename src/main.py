@@ -29,6 +29,7 @@ def run_predictor(config: dict, with_api: bool = False):
     from .inferrer import CrossingInferrer
     from .history import HistoryLogger
     from .feed import NRODFeed
+    from .rtt import RTTClient
 
     tracker = TrainTracker(config)
     inferrer = CrossingInferrer(config)
@@ -42,10 +43,22 @@ def run_predictor(config: dict, with_api: bool = False):
 
     feed = NRODFeed(tracker, on_message_callback=on_feed_message)
 
+    # Start RTT polling
+    rtt_config = config.get("rtt", {})
+    rtt_stations = rtt_config.get("stations", ["ANG", "GOR"])
+    rtt_interval = rtt_config.get("poll_interval", 15)
+    rtt = RTTClient(stations=rtt_stations, poll_interval=rtt_interval)
+    rtt.set_callback(lambda **kw: tracker.handle_rtt_update(**{
+        k: v for k, v in kw.items()
+        if k in ("headcode", "station", "platform", "status", "origin_codes", "dest_codes")
+    }))
+    rtt.set_active_check(lambda: len(tracker.trains) > 0)
+    rtt.start()
+
     # Start API server in background if requested
     if with_api:
         api_thread = threading.Thread(
-            target=_start_api, args=(config, inferrer, history), daemon=True
+            target=_start_api, args=(config, tracker, inferrer, history), daemon=True
         )
         api_thread.start()
 
@@ -81,24 +94,26 @@ def run_predictor(config: dict, with_api: bool = False):
             # Log completed train passages
             for train in list(tracker.trains.values()):
                 from .models import TrainPhase
-                if train.phase == TrainPhase.CLEARED:
+                if train.phase == TrainPhase.CLEARED and not getattr(train, '_passage_logged', False):
                     history.log_train_passage(train)
+                    train._passage_logged = True
 
             sleep(2)  # Check every 2 seconds
 
     except KeyboardInterrupt:
         print("\n👋 Shutting down...")
     finally:
+        rtt.stop()
         feed.stop()
         logger.info("🔴 Stopped")
 
 
-def _start_api(config: dict, inferrer, history):
+def _start_api(config: dict, tracker, inferrer, history):
     """Start the FastAPI server."""
     import uvicorn
     from .api import create_app
 
-    app = create_app(inferrer, history)
+    app = create_app(tracker, inferrer, history)
     api_config = config.get("api", {})
     host = api_config.get("host", "0.0.0.0")
     port = api_config.get("port", 8590)

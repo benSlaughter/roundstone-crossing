@@ -109,9 +109,8 @@ class NRODListener(stomp.ConnectionListener):
                 continue
 
             train_id = body.get("train_id", "")
-            tiploc = body.get("loc_stanox", "")  # Actually STANOX in movement msgs
-            event_type = body.get("train_service_code", "")
-            planned_tiploc = body.get("next_report_stanox", "")
+            stanox = body.get("loc_stanox", "")
+            event_type = body.get("planned_event_type", "")
 
             # Get the actual timestamp
             actual_timestamp = body.get("actual_timestamp", "")
@@ -123,12 +122,13 @@ class NRODListener(stomp.ConnectionListener):
             else:
                 ts = datetime.now(timezone.utc)
 
-            headcode = body.get("train_service_code", "")
+            # Headcode is chars 3-6 of the 10-char train_id (e.g., "512E281Y27" → "2E28")
+            headcode = train_id[2:6] if len(train_id) >= 6 else ""
 
-            if train_id:
+            if train_id and stanox:
                 self.tracker.handle_trust_movement(
                     train_id=train_id,
-                    tiploc=tiploc,
+                    stanox=stanox,
                     event_type=event_type,
                     actual_time=ts,
                     headcode=headcode,
