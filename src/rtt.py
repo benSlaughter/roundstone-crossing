@@ -159,6 +159,102 @@ class RTTClient:
         except requests.exceptions.RequestException as e:
             logger.error(f"RTT poll {crs} failed: {e}")
 
+    def get_upcoming(self, crs: str, limit: int = 5) -> list[dict]:
+        """Query upcoming services at a station. Returns list of service dicts."""
+        if not self._ensure_token():
+            return []
+        try:
+            resp = requests.get(
+                f"{self.BASE_URL}/gb-nr/location",
+                params={"code": crs},
+                headers={"Authorization": f"Bearer {self._access_token}"},
+                timeout=10,
+            )
+            if resp.status_code != 200:
+                return []
+            data = resp.json()
+            station_name = data.get("query", {}).get("location", {}).get("description", crs)
+            services = data.get("services", [])
+
+            results = []
+            for svc in services:
+                temporal = svc.get("temporalData", {})
+                schedule = svc.get("scheduleMetadata", {})
+                status = temporal.get("status", "")
+
+                # Skip trains that have already departed
+                if status in ("HAS_DEPTED",):
+                    continue
+
+                headcode = schedule.get("trainReportingIdentity", "?")
+                display_as = temporal.get("displayAs", "CALL")
+                operator = schedule.get("operator", {}).get("name", "")
+
+                # Arrival time from nested structure
+                arr_data = temporal.get("arrival", {})
+                rt_arr = arr_data.get("realtimeForecast", "")
+                sched_arr = arr_data.get("scheduleAdvertised", "")
+                arr_iso = rt_arr or sched_arr
+                arr_display = arr_iso[11:16] if len(arr_iso) >= 16 else ""
+                arr_delayed = rt_arr and sched_arr and rt_arr != sched_arr
+                sched_arr_display = sched_arr[11:16] if arr_delayed and len(sched_arr) >= 16 else ""
+
+                # Departure time from nested structure
+                dep_data = temporal.get("departure", {})
+                rt_dep = dep_data.get("realtimeForecast", "")
+                sched_dep = dep_data.get("scheduleAdvertised", "")
+                dep_iso = rt_dep or sched_dep
+                dep_display = dep_iso[11:16] if len(dep_iso) >= 16 else ""
+                is_delayed = rt_dep and sched_dep and rt_dep != sched_dep
+                sched_display = sched_dep[11:16] if is_delayed and len(sched_dep) >= 16 else ""
+
+                # Platform
+                platform = temporal.get("platform", "?")
+
+                # Origin/destination from nested location structure
+                origin_list = svc.get("origin", [])
+                dest_list = svc.get("destination", [])
+                origin = origin_list[0].get("location", {}).get("description", "") if origin_list else ""
+                dest = dest_list[0].get("location", {}).get("description", "") if dest_list else ""
+
+                results.append({
+                    "headcode": headcode,
+                    "station": station_name,
+                    "platform": platform,
+                    "arrival": arr_display,
+                    "arrival_scheduled": sched_arr_display,
+                    "departure": dep_display,
+                    "departure_scheduled": sched_display,
+                    "status": status,
+                    "display_as": display_as,
+                    "operator": operator,
+                    "origin": origin,
+                    "destination": dest,
+                })
+                if len(results) >= limit:
+                    break
+            return results
+        except Exception as e:
+            logger.error(f"RTT upcoming query failed: {e}")
+            return []
+
+    def get_raw_services(self, crs: str) -> dict:
+        """Debug: return raw RTT response for a station."""
+        if not self._ensure_token():
+            return {}
+        try:
+            resp = requests.get(
+                f"{self.BASE_URL}/gb-nr/location",
+                params={"code": crs},
+                headers={"Authorization": f"Bearer {self._access_token}"},
+                timeout=10,
+            )
+            if resp.status_code != 200:
+                return {"error": resp.status_code}
+            return resp.json()
+        except Exception as e:
+            return {"error": str(e)}
+
     def _process_service(self, svc: dict, station_name: str):
         """Extract relevant data from a service and notify callback."""
         if not self._on_update:

@@ -16,7 +16,8 @@ from .tracker import TrainTracker
 STATIC_DIR = Path(__file__).parent.parent / "static"
 
 
-def create_app(tracker: TrainTracker, inferrer: CrossingInferrer, history: HistoryLogger) -> FastAPI:
+def create_app(tracker: TrainTracker, inferrer: CrossingInferrer, history: HistoryLogger,
+               rtt_client=None) -> FastAPI:
     app = FastAPI(title="Roundstone Crossing Predictor")
 
     @app.get("/")
@@ -35,7 +36,7 @@ def create_app(tracker: TrainTracker, inferrer: CrossingInferrer, history: Histo
         from .models import TrainPhase
         trains = []
         for hc, t in tracker.trains.items():
-            if t.phase in (TrainPhase.LOST, TrainPhase.CLEARED):
+            if t.phase in (TrainPhase.LOST,):
                 continue
             trains.append({
                 "headcode": t.headcode,
@@ -86,5 +87,15 @@ def create_app(tracker: TrainTracker, inferrer: CrossingInferrer, history: Histo
     async def stats():
         """Summary statistics."""
         return history.get_stats()
+
+    @app.get("/next")
+    async def next_trains(station: str = Query("ANG", description="CRS code (ANG or GBS)"),
+                          limit: int = Query(5, ge=1, le=20)):
+        """Upcoming trains at a station from RTT."""
+        if not rtt_client:
+            return {"error": "RTT not available"}
+        return {"services": rtt_client.get_upcoming(station, limit)}
+
+    app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
     return app

@@ -302,6 +302,6 @@ class TrainTracker:
             if train.is_stale and train.phase != TrainPhase.LOST:
                 logger.info(f"👻 Train {hc} marked as LOST (no update for {train.age_secs:.0f}s)")
                 train.phase = TrainPhase.LOST
-            # Remove trains that cleared or were lost more than 10 minutes ago
-            if train.phase in (TrainPhase.CLEARED, TrainPhase.LOST) and train.age_secs > 600:
+            # Remove trains that cleared or were lost more than 3 minutes ago
+            if train.phase in (TrainPhase.CLEARED, TrainPhase.LOST) and train.age_secs > 180:
                 del self.trains[hc]

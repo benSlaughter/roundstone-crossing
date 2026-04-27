@@ -44,9 +44,10 @@ class CrossingInferrer:
             self.status.predicted_change = self._predict_opening(active_trains)
             self.status.predicted_next_state = CrossingState.OPENING_PREDICTED
 
-        elif TrainPhase.STRIKE_IN in phases:
-            # Train in strike-in zone — closure imminent
-            nearest = self._nearest_train(active_trains, TrainPhase.STRIKE_IN)
+        elif TrainPhase.STRIKE_IN in phases or TrainPhase.AT_STATION in phases:
+            # Train in strike-in zone or at a station before the crossing
+            nearest = (self._nearest_train(active_trains, TrainPhase.STRIKE_IN)
+                       or self._nearest_train(active_trains, TrainPhase.AT_STATION))
             self._transition(CrossingState.CLOSING_PREDICTED, confidence=0.8)
             self.status.predicted_change = nearest.predicted_at_crossing if nearest else None
             self.status.predicted_next_state = CrossingState.CLOSED_INFERRED

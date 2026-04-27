@@ -54,7 +54,7 @@ class TrackedTrain:
 
     @property
     def is_stale(self) -> bool:
-        return self.age_secs > 300  # 5 minutes without update
+        return self.age_secs > 120  # 2 minutes without update
 
 
 @dataclass

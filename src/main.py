@@ -58,7 +58,7 @@ def run_predictor(config: dict, with_api: bool = False):
     # Start API server in background if requested
     if with_api:
         api_thread = threading.Thread(
-            target=_start_api, args=(config, tracker, inferrer, history), daemon=True
+            target=_start_api, args=(config, tracker, inferrer, history, rtt), daemon=True
         )
         api_thread.start()
 
@@ -108,12 +108,12 @@ def run_predictor(config: dict, with_api: bool = False):
         logger.info("🔴 Stopped")
 
 
-def _start_api(config: dict, tracker, inferrer, history):
+def _start_api(config: dict, tracker, inferrer, history, rtt_client=None):
     """Start the FastAPI server."""
     import uvicorn
     from .api import create_app
 
-    app = create_app(tracker, inferrer, history)
+    app = create_app(tracker, inferrer, history, rtt_client=rtt_client)
     api_config = config.get("api", {})
     host = api_config.get("host", "0.0.0.0")
     port = api_config.get("port", 8590)

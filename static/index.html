@@ -28,7 +28,8 @@
     /* Main status card */
     .status-card {
       width: 100%;
-      max-width: 480px;
+      max-width: 600px;
+      box-sizing: border-box;
       border-radius: 1rem;
       padding: 2.5rem 2rem;
       text-align: center;
@@ -194,32 +195,33 @@
       color: #3f3f46;
     }
 
-    /* Legend */
-    .legend-toggle {
+    /* Tab bar */
+    .tab-bar {
       width: 100%;
-      max-width: 480px;
-      margin-bottom: 1.5rem;
-      text-align: right;
+      max-width: 600px;
+      display: flex;
+      border-bottom: 2px solid #27272a;
+      margin-bottom: 0;
     }
-    .legend-toggle button {
-      background: none;
-      border: 1px solid #27272a;
-      border-radius: 0.5rem;
+    .tab-bar button {
+      flex: 1;
+      background: transparent;
+      border: none;
+      border-bottom: 2px solid transparent;
       color: #71717a;
-      font-size: 0.75rem;
-      padding: 0.3rem 0.6rem;
+      font-size: 0.8rem;
+      font-weight: 500;
+      padding: 0.6rem 0;
       cursor: pointer;
+      transition: all 0.2s;
+      margin-bottom: -2px;
     }
-    .legend-toggle button:hover { color: #e4e4e7; border-color: #3f3f46; }
+    .tab-bar button:hover { color: #a1a1aa; }
+    .tab-bar button.active { color: #e4e4e7; border-bottom-color: #3b82f6; }
+
+    /* Legend (inside tab content) */
     .legend-panel {
       display: none;
-      width: 100%;
-      max-width: 480px;
-      background: #18181b;
-      border: 1px solid #27272a;
-      border-radius: 0.75rem;
-      padding: 1rem 1.25rem;
-      margin-bottom: 1.5rem;
       font-size: 0.82rem;
       line-height: 1.7;
     }
@@ -254,7 +256,8 @@
       max-width: 600px;
       background: #18181b;
       border: 1px solid #27272a;
-      border-radius: 0.75rem;
+      border-top: none;
+      border-radius: 0 0 0.75rem 0.75rem;
       padding: 1.25rem 1rem 1rem;
       margin-bottom: 1.5rem;
     }
@@ -445,6 +448,97 @@
     .track-train.phase-at_crossing { background: #dc2626; }
     .track-train.phase-at_station { background: #4d7c0f; }
     .track-train.phase-cleared { background: #1e3a5f; opacity: 0.6; }
+    /* Upcoming trains panel */
+    .upcoming-panel {
+      display: none;
+      font-size: 0.75rem;
+    }
+    .upcoming-panel.visible { display: block; }
+    .upcoming-panel h3 {
+      margin: 0 0 0.5rem 0;
+      font-size: 0.8rem;
+      color: #a1a1aa;
+    }
+    /* Sub-tabs (segmented control) */
+    .sub-tabs {
+      display: flex;
+      background: #0f1117;
+      border-radius: 0.5rem;
+      padding: 0.2rem;
+      margin-bottom: 0.75rem;
+      gap: 0.15rem;
+    }
+    .sub-tab {
+      flex: 1;
+      background: transparent;
+      border: none;
+      border-radius: 0.375rem;
+      color: #52525b;
+      font-size: 0.72rem;
+      font-weight: 500;
+      padding: 0.35rem 0.5rem;
+      cursor: pointer;
+      transition: all 0.15s ease;
+      text-align: center;
+    }
+    .sub-tab:hover { color: #a1a1aa; }
+    .sub-tab.active {
+      background: #27272a;
+      color: #e4e4e7;
+      box-shadow: 0 1px 2px rgba(0,0,0,0.3);
+    }
+
+    .upcoming-panel .station-tabs {
+      display: flex;
+      gap: 0.5rem;
+      margin-bottom: 0.5rem;
+    }
+    .upcoming-panel .station-tab {
+      background: none;
+      border: 1px solid #27272a;
+      border-radius: 0.4rem;
+      color: #71717a;
+      font-size: 0.7rem;
+      padding: 0.15rem 0.5rem;
+      cursor: pointer;
+    }
+    .upcoming-panel .station-tab.active {
+      color: #e4e4e7;
+      border-color: #3f3f46;
+      background: #27272a;
+    }
+    .upcoming-table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+    .upcoming-table th {
+      text-align: left;
+      color: #71717a;
+      font-weight: 500;
+      padding: 0.2rem 0.4rem;
+      border-bottom: 1px solid #27272a;
+      font-size: 0.65rem;
+    }
+    .upcoming-table td {
+      padding: 0.25rem 0.4rem;
+      color: #d4d4d8;
+      border-bottom: 1px solid #1f1f23;
+    }
+    .upcoming-table .delayed {
+      color: #f87171;
+      text-decoration: line-through;
+      font-size: 0.6rem;
+      margin-left: 0.3rem;
+    }
+    .upcoming-table .status-badge {
+      font-size: 0.55rem;
+      padding: 0.1rem 0.3rem;
+      border-radius: 0.25rem;
+      background: #27272a;
+      color: #a1a1aa;
+    }
+    .upcoming-table .status-badge.approaching { background: #92400e33; color: #fbbf24; }
+    .upcoming-table .status-badge.at_platform { background: #4d7c0f33; color: #84cc16; }
   </style>
 </head>
 <body>
@@ -463,40 +557,15 @@
     </div>
   </div>
 
-  <div class="legend-toggle">
-    <button onclick="document.getElementById('legend').classList.toggle('visible')">ℹ Legend</button>
-  </div>
-  <div class="legend-panel" id="legend">
-    <dl>
-      <div class="legend-section">Train phases</div>
-      <dt>Approaching</dt>
-      <dd>Train detected 1–2 stations away, heading towards the crossing</dd>
-      <dt>Strike in</dt>
-      <dd>Train at the nearest station — barrier closure is likely imminent</dd>
-      <dt>At crossing</dt>
-      <dd>Train is in the track section over the crossing — barriers are down</dd>
-      <dt>Cleared</dt>
-      <dd>Train has passed the crossing and reached the next station</dd>
-      <dt>At station</dt>
-      <dd>Train reported at Angmering or Goring by TRUST data (may not have berth-level position)</dd>
-      <div class="legend-section">Crossing states</div>
-      <dt>🟢 Open</dt>
-      <dd>No trains near the crossing — barriers are up, road is clear</dd>
-      <dt>🟡 Closing Soon</dt>
-      <dd>Train approaching — barriers expected to lower shortly</dd>
-      <dt>🔴 Closed</dt>
-      <dd>Train at the crossing — barriers are inferred to be down</dd>
-      <dt>🟡 Opening Soon</dt>
-      <dd>Train clearing — barriers expected to raise shortly</dd>
-      <div class="legend-section">Directions</div>
-      <dt>↗ East</dt>
-      <dd>Towards Goring-by-Sea, Worthing, Brighton (up line)</dd>
-      <dt>↙ West</dt>
-      <dd>Towards Angmering, Littlehampton, Portsmouth (down line)</dd>
-    </dl>
+  <div class="tab-bar" id="tab-bar">
+    <button class="active" onclick="switchTab('map', this)">Map</button>
+    <button onclick="switchTab('upcoming', this)">Upcoming</button>
+    <button onclick="switchTab('history', this)">History</button>
+    <button onclick="switchTab('info', this)">Info</button>
   </div>
 
   <div class="schematic">
+    <div class="tab-content" id="tab-map">
     <div class="schematic-title">Track Diagram
       <button class="berth-toggle" onclick="document.getElementById('track-area').classList.toggle('show-berths')">Berths</button>
     </div>
@@ -524,21 +593,70 @@
       <!-- Berth ticks rendered by JS -->
       <!-- Trains rendered by JS -->
     </div>
+    </div><!-- end tab-map -->
+
+    <div class="upcoming-panel" id="tab-upcoming" style="display:none">
+      <div class="sub-tabs">
+        <button class="sub-tab active" onclick="switchUpcomingStation('ANG', this)">Angmering</button>
+        <button class="sub-tab" onclick="switchUpcomingStation('GBS', this)">Goring-by-Sea</button>
+      </div>
+      <table class="upcoming-table">
+        <thead>
+          <tr><th>Train</th><th>Arrives</th><th>Departs</th><th>From</th><th>To</th><th>Status</th></tr>
+        </thead>
+        <tbody id="upcoming-body">
+          <tr><td colspan="6" style="color:#71717a">Select Upcoming tab to load…</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="legend-panel" id="tab-info" style="display:none">
+      <dl>
+        <div class="legend-section">Train phases</div>
+        <dt>Approaching</dt>
+        <dd>Train detected 1–2 stations away, heading towards the crossing</dd>
+        <dt>Strike in</dt>
+        <dd>Train at the nearest station — barrier closure is likely imminent</dd>
+        <dt>At crossing</dt>
+        <dd>Train is in the track section over the crossing — barriers are down</dd>
+        <dt>Cleared</dt>
+        <dd>Train has passed the crossing and reached the next station</dd>
+        <dt>At station</dt>
+        <dd>Train reported at Angmering or Goring</dd>
+        <div class="legend-section">Crossing states</div>
+        <dt>🟢 Open</dt>
+        <dd>No trains near the crossing — barriers are up, road is clear</dd>
+        <dt>🟡 Closing Soon</dt>
+        <dd>Train approaching — barriers expected to lower shortly</dd>
+        <dt>🔴 Closed</dt>
+        <dd>Train at the crossing — barriers are inferred to be down</dd>
+        <dt>🟡 Opening Soon</dt>
+        <dd>Train clearing — barriers expected to raise shortly</dd>
+        <div class="legend-section">Directions</div>
+        <dt>↗ East</dt>
+        <dd>Towards Goring-by-Sea, Worthing, Brighton (up line)</dd>
+        <dt>↙ West</dt>
+        <dd>Towards Angmering, Littlehampton, Portsmouth (down line)</dd>
+      </dl>
+    </div>
+
+    <div id="tab-history" style="display:none">
+      <div class="sub-tabs">
+        <button class="sub-tab active" onclick="switchHistorySub('crossing', this)">Crossing</button>
+        <button class="sub-tab" onclick="switchHistorySub('trains', this)">Trains</button>
+      </div>
+      <div id="history-sub-crossing">
+        <div id="history-list"><div class="empty">Loading…</div></div>
+      </div>
+      <div id="history-sub-trains" style="display:none">
+        <div id="recent-trains-list"><div class="empty">Loading…</div></div>
+      </div>
+    </div>
   </div>
 
   <div class="section" id="trains-section" style="display:none">
     <div class="section-title">Active Trains</div>
     <div id="trains-list"></div>
-  </div>
-
-  <div class="section">
-    <div class="section-title">Recent Trains</div>
-    <div id="recent-trains-list"><div class="empty">Loading…</div></div>
-  </div>
-
-  <div class="section">
-    <div class="section-title">Recent History</div>
-    <div id="history-list"><div class="empty">Loading…</div></div>
   </div>
 
   <footer><span class="pulse" id="pulse"></span><span id="footer-text">Connecting…</span></footer>
@@ -806,6 +924,81 @@
     }
 
     // Initial load
+    // Upcoming trains panel
+    let upcomingStation = 'ANG';
+    let upcomingVisible = false;
+    let upcomingInterval = null;
+
+    function switchTab(name, btn) {
+      // Hide all tab contents
+      document.getElementById('tab-map').style.display = 'none';
+      document.getElementById('tab-upcoming').style.display = 'none';
+      document.getElementById('tab-history').style.display = 'none';
+      document.getElementById('tab-info').style.display = 'none';
+      // Deactivate all tab buttons
+      document.querySelectorAll('.tab-bar button').forEach(b => b.classList.remove('active'));
+      // Show selected tab
+      document.getElementById('tab-' + name).style.display = 'block';
+      btn.classList.add('active');
+      // Manage upcoming polling
+      if (name === 'upcoming') {
+        if (!upcomingVisible) {
+          upcomingVisible = true;
+          updateUpcoming();
+          upcomingInterval = setInterval(updateUpcoming, 30000);
+        }
+      } else {
+        upcomingVisible = false;
+        if (upcomingInterval) {
+          clearInterval(upcomingInterval);
+          upcomingInterval = null;
+        }
+      }
+    }
+
+    function switchUpcomingStation(crs, btn) {
+      upcomingStation = crs;
+      btn.parentElement.querySelectorAll('.sub-tab').forEach(t => t.classList.remove('active'));
+      btn.classList.add('active');
+      updateUpcoming();
+    }
+
+    function switchHistorySub(name, btn) {
+      document.getElementById('history-sub-crossing').style.display = name === 'crossing' ? 'block' : 'none';
+      document.getElementById('history-sub-trains').style.display = name === 'trains' ? 'block' : 'none';
+      btn.parentElement.querySelectorAll('.sub-tab').forEach(t => t.classList.remove('active'));
+      btn.classList.add('active');
+    }
+
+    async function updateUpcoming() {
+      try {
+        const data = await fetchJSON(`/next?station=${upcomingStation}&limit=8`);
+        const body = document.getElementById('upcoming-body');
+        if (!data.services || data.services.length === 0) {
+          body.innerHTML = '<tr><td colspan="6" style="color:#71717a">No upcoming services</td></tr>';
+          return;
+        }
+        body.innerHTML = data.services.map(s => {
+          let arr = s.arrival || '—';
+          if (s.arrival_scheduled) arr += `<span class="delayed">${s.arrival_scheduled}</span>`;
+          let dep = s.departure || '—';
+          if (s.departure_scheduled) dep += `<span class="delayed">${s.departure_scheduled}</span>`;
+          const statusMap = { 'APPROACHING': 'approaching', 'AT_PLATFORM': 'at_platform', 'ARRIVING': 'approaching' };
+          const badgeClass = statusMap[s.status] || '';
+          const statusText = s.status ? s.status.replace('_', ' ').toLowerCase() : '';
+          const statusBadge = statusText ? `<span class="status-badge ${badgeClass}">${statusText}</span>` : '';
+          return `<tr>
+            <td><strong>${s.headcode}</strong></td>
+            <td>${arr}</td>
+            <td>${dep}</td>
+            <td>${s.origin}</td>
+            <td>${s.destination}</td>
+            <td>${statusBadge}</td>
+          </tr>`;
+        }).join('');
+      } catch (e) { /* ignore */ }
+    }
+
     updateStatus();
     updateDiagram();
     updateRecentTrains();
