@@ -63,6 +63,15 @@ be powered via USB-C or directly from a battery through the 5V/VIN pin.
   +---|---|-+
       |   |
      VIN  GND
+      |
+      +---[R2 100k]---+--- GPIO0  (battery ADC)
+                       |
+                      [R3 100k]
+                       |
+                      GND
+
+  Status LED (optional)
+  GPIO10 ---[220ohm]---[LED]--- GND
 ```
 
 ## Pin Mapping
@@ -79,6 +88,8 @@ be powered via USB-C or directly from a battery through the 5V/VIN pin.
 | GPIO7 | SPI CS | MicroSD CS | SD card chip select |
 | GPIO8 | I2C SDA | DS3231 SDA | RTC data line |
 | GPIO9 | I2C SCL | DS3231 SCL | RTC clock line |
+| GPIO0 | ADC input | Battery voltage divider midpoint | 2x 100kOhm divider halves battery voltage |
+| GPIO10 | Digital out | Status LED (via 220ohm) | Optional; quick blink on wake, rapid blink = low battery |
 
 ## Connection Details
 
@@ -157,6 +168,44 @@ so a single 18650 cell (3.0V-4.2V) works directly.
 
 **Do not connect the battery to the 3.3V pin** -- that pin is the regulated
 output and connecting a higher voltage there will damage the board.
+
+### Battery Voltage Monitoring
+
+A voltage divider (2x 100kOhm) on the battery input lets the firmware read
+battery voltage via the ADC on GPIO0:
+
+```
+  Battery+ (VIN) ---[R2 100k]---+--- GPIO0 (ADC)
+                                |
+                               [R3 100k]
+                                |
+                               GND
+```
+
+This halves the battery voltage so 4.2V reads as ~2.1V, safely within the
+ESP32-C3 ADC range (0-3.3V). The 100kOhm resistors draw negligible current
+(~20 microamps at 4.2V).
+
+The firmware reads the ADC, multiplies by the divider ratio, and shows the
+result on the web status page and debug page. Below 3.3V it shows a LOW
+warning; below 3.0V the device logs a warning and enters deep sleep to protect
+the cell.
+
+### Status LED
+
+An optional LED on GPIO10 provides visual feedback without needing WiFi:
+
+```
+  GPIO10 ---[220ohm]---[LED]--- GND
+```
+
+- **Double blink on wake** -- confirms the device is alive and responding to
+  light detection
+- **Rapid blink (10x)** -- critical low battery, device is shutting down
+- **Steady on** -- WiFi AP mode is active
+
+If you skip the LED, the device works fine -- you just lose the visual
+indicator.
 
 If you want USB charging while deployed, the SuperMini's USB-C port can be used,
 but in practice you will just swap the battery or take the device home to

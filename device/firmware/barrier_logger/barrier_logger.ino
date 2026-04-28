@@ -40,6 +40,19 @@
 #define SD_CS             7
 #define RTC_SDA           8
 #define RTC_SCL           9
+#define PIN_BATTERY       0   // ADC input for battery voltage (via voltage divider)
+#define PIN_LED          10   // Status LED (built-in on some SuperMini boards)
+
+// ---------------------------------------------------------------------------
+// Battery monitoring
+// ---------------------------------------------------------------------------
+// Voltage divider: 100kOhm + 100kOhm from battery to GND, midpoint to GPIO0
+// This halves the battery voltage so 4.2V -> 2.1V (within ESP32 ADC range)
+// Calibration: adjust these if your readings are off
+#define BATTERY_DIVIDER_RATIO  2.0
+#define BATTERY_ADC_VREF       3.3
+#define BATTERY_LOW_VOLTS      3.3   // Log warning below this
+#define BATTERY_CRITICAL_VOLTS 3.0   // Stop logging below this
 
 // ---------------------------------------------------------------------------
 // Timing constants (milliseconds unless noted)
@@ -103,6 +116,8 @@ void handleTimeSync();
 void handleClear();
 void handleDebug();
 void handleDebugStream();
+float readBatteryVoltage();
+void blinkLED(int count, int onMs, int offMs);
 String getTimestamp();
 String formatUptime(unsigned long ms);
 
@@ -113,10 +128,27 @@ void setup() {
   Serial.begin(115200);
   delay(100);
   bootCount++;
+
+  // --- Status LED ---
+  pinMode(PIN_LED, OUTPUT);
+  blinkLED(2, 50, 50);  // Quick double-blink on any wake
+
   Serial.println();
   Serial.println("=== Barrier Logger ===");
   Serial.print("Boot #");
   Serial.println(bootCount);
+
+  // --- Battery check ---
+  float battV = readBatteryVoltage();
+  Serial.print("Battery: ");
+  Serial.print(battV, 2);
+  Serial.println("V");
+  if (battV > 0 && battV < BATTERY_CRITICAL_VOLTS) {
+    Serial.println("CRITICAL: Battery too low, sleeping indefinitely");
+    blinkLED(10, 100, 100);  // Rapid blink = low battery warning
+    enterDeepSleep();
+    return;
+  }
 
   // --- Initialise I2C for RTC ---
   Wire.begin(RTC_SDA, RTC_SCL);
@@ -382,6 +414,7 @@ static const char STATUS_PAGE_HTML[] PROGMEM = R"rawliteral(
   <tr><th>Last Event</th><td>%LASTEVENT%</td></tr>
   <tr><th>Total Events</th><td>%TOTALEVENTS%</td></tr>
   <tr><th>Boot Count</th><td>%BOOTCOUNT%</td></tr>
+  <tr><th>Battery</th><td>%BATTERY%</td></tr>
   <tr><th>SD Card</th><td>%SDSTATUS%</td></tr>
   <tr><th>RTC</th><td>%RTCSTATUS%</td></tr>
 </table>
@@ -468,6 +501,12 @@ void handleRoot() {
   page.replace("%LASTEVENT%", lastEvent);
   page.replace("%TOTALEVENTS%", String(totalEvents));
   page.replace("%BOOTCOUNT%", String(bootCount));
+
+  float battV = readBatteryVoltage();
+  String battStr = String(battV, 2) + "V";
+  if (battV < BATTERY_LOW_VOLTS && battV > 0) battStr += " (LOW)";
+  page.replace("%BATTERY%", battStr);
+
   page.replace("%SDSTATUS%", sdAvailable ? "OK" : "Not found");
   page.replace("%RTCSTATUS%", rtcAvailable ? "OK" : "Not found");
 
@@ -575,6 +614,7 @@ static const char DEBUG_PAGE_HTML[] PROGMEM = R"rawliteral(
   <tr><th>Sensor GPIO</th><td id="gpio">-</td></tr>
   <tr><th>Pulses (4s window)</th><td id="pulses">-</td></tr>
   <tr><th>Detected State</th><td id="state">-</td></tr>
+  <tr><th>Battery</th><td id="battery">-</td></tr>
   <tr><th>Threshold</th><td>%THRESHOLD% pulses in %WINDOW%ms</td></tr>
   <tr><th>Samples</th><td id="samples">0</td></tr>
 </table>
@@ -632,6 +672,9 @@ function poll() {
       }
 
       document.getElementById('samples').textContent = samples;
+      if (d.battery !== undefined) {
+        document.getElementById('battery').textContent = d.battery.toFixed(2) + 'V';
+      }
     })
     .catch(function(e) { addLog('ERROR: ' + e); });
 }
@@ -665,13 +708,37 @@ void handleDebugStream() {
   lastClientActivity = millis();
 
   int gpioState = digitalRead(PIN_LIGHT_SENSOR);
-  String json = "{\"gpio\":" + String(gpioState) + "}";
+  float battV = readBatteryVoltage();
+  String json = "{\"gpio\":" + String(gpioState) + ",\"battery\":" + String(battV, 2) + "}";
   server.send(200, "application/json", json);
 }
 
 // ===========================================================================
 // Utility
 // ===========================================================================
+
+float readBatteryVoltage() {
+  // Read ADC on battery voltage divider pin
+  // Average multiple samples for stability
+  long total = 0;
+  for (int i = 0; i < 16; i++) {
+    total += analogRead(PIN_BATTERY);
+    delayMicroseconds(100);
+  }
+  float adcValue = total / 16.0;
+  // Convert ADC reading to voltage (ESP32-C3 has 12-bit ADC, 0-3.3V range)
+  float voltage = (adcValue / 4095.0) * BATTERY_ADC_VREF * BATTERY_DIVIDER_RATIO;
+  return voltage;
+}
+
+void blinkLED(int count, int onMs, int offMs) {
+  for (int i = 0; i < count; i++) {
+    digitalWrite(PIN_LED, HIGH);
+    delay(onMs);
+    digitalWrite(PIN_LED, LOW);
+    if (i < count - 1) delay(offMs);
+  }
+}
 
 String formatUptime(unsigned long ms) {
   unsigned long secs = ms / 1000;

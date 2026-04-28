@@ -42,15 +42,16 @@ WiFi from your phone.
 | ESP32-C3 SuperMini | WeAct / generic | ~£4 |
 | DS3231 RTC module | ZS-042 or similar | ~£2 |
 | Phototransistor | TEPT5700 or similar NPN | ~£1 |
-| 10kOhm resistor | 1/4W through-hole | ~£0.10 |
+| Resistors | 10kOhm (sensor) + 2x 100kOhm (battery divider) | ~£0.20 |
 | MicroSD card breakout | SPI module (Catalex etc.) | ~£2 |
 | MicroSD card | Any, 1GB+ is fine | ~£3 |
 | 18650 LiPo battery + holder | Flat-top unprotected OK | ~£5 |
 | Tactile push button | 6mm through-hole | ~£0.20 |
+| LED (optional) | 3mm, any colour, + 220ohm resistor | ~£0.10 |
 | Weatherproof enclosure | Small food container / Tupperware | ~£2 |
 | Light collimator | Drinking straw or pen tube | ~£0 |
 | Hookup wire, perfboard | -- | ~£1 |
-| **Total** | | **~£20** |
+| **Total** | | **~£21** |
 
 All parts are available from AliExpress, Amazon, or The Pi Hut. Nothing is
 exotic -- if you have done any ESP32 or Arduino project before you probably have
@@ -112,43 +113,44 @@ In practice, expect to swap or recharge the battery every week or two.
 
 Press the tactile button to activate WiFi. The device creates a hotspot:
 
-- **SSID**: `RoundstoneSensor`
-- **Password**: `crossing`
+- **SSID**: `RXLogger`
+- **Password**: `roundstone`
 - **URL**: `http://192.168.4.1`
 
 The web page lets you:
 
-- View device status (battery level, last event, log file size)
-- Download CSV log files
-- Sync the RTC to your phone's clock
-- Clear old log files
+- View device status (battery voltage, last event, total events, boot count)
+- Download CSV log file
+- Live debug/calibration view for aiming the sensor
+- Sync the RTC to your phone's clock (automatic on page load)
+- Clear old log data
 
 WiFi automatically deactivates after 5 minutes of inactivity to conserve power.
 
 ## Data Format
 
-Logs are stored on the MicroSD card as CSV files, one per day:
+Logs are stored on the MicroSD card as a single CSV file:
 
 ```
-device/logs/2026-04-29.csv
+/barrier_log.csv
 ```
 
 Each line contains a timestamp and state:
 
 ```csv
-timestamp,state
+2026-04-29T08:23:15,BOOT
 2026-04-29T08:23:15,CLOSED
 2026-04-29T08:26:42,OPEN
 2026-04-29T08:45:03,CLOSED
 2026-04-29T08:47:31,OPEN
 ```
 
-- `timestamp` is ISO 8601 local time, sourced from the DS3231 RTC.
-- `state` is either `CLOSED` (barriers down, lights flashing) or `OPEN`
-  (lights stopped, barriers up).
+- `timestamp` is ISO 8601 UTC, sourced from the DS3231 RTC.
+- `state` is one of: `BOOT` (device powered on), `CLOSED` (barriers down),
+  `OPEN` (barriers up), `CLEARED` (log was cleared via web UI).
 
-The first event of each file is always the first state change detected after
-midnight or after the device is powered on.
+The file grows by append only. A full day of typical crossing activity adds
+roughly 1-2 KB.
 
 ## Deployment
 
