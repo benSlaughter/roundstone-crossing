@@ -67,10 +67,25 @@ class HistoryLogger:
             )
         """)
 
+        db.execute("""
+            CREATE TABLE IF NOT EXISTS train_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                headcode TEXT NOT NULL,
+                direction TEXT,
+                event TEXT NOT NULL,
+                from_berth TEXT,
+                to_berth TEXT,
+                phase TEXT,
+                timestamp TEXT NOT NULL
+            )
+        """)
+
         # Indexes for common queries
         db.execute("CREATE INDEX IF NOT EXISTS idx_intervals_started ON state_intervals(started_at)")
         db.execute("CREATE INDEX IF NOT EXISTS idx_passages_created ON train_passages(created_at)")
         db.execute("CREATE INDEX IF NOT EXISTS idx_events_timestamp ON raw_events(timestamp)")
+        db.execute("CREATE INDEX IF NOT EXISTS idx_train_events_ts ON train_events(timestamp)")
+        db.execute("CREATE INDEX IF NOT EXISTS idx_train_events_hc ON train_events(headcode, timestamp)")
 
         db.commit()
         db.close()
@@ -126,6 +141,19 @@ class HistoryLogger:
         db.close()
         logger.debug(f"📊 Logged passage: {train.headcode} ({train.direction})")
 
+    def log_train_event(self, headcode: str, event: str, from_berth: str = None,
+                        to_berth: str = None, phase: str = None, direction: str = None):
+        """Log a berth step or phase change for a train."""
+        now = datetime.now(timezone.utc).isoformat()
+        db = sqlite3.connect(str(self.db_path))
+        db.execute(
+            "INSERT INTO train_events (headcode, direction, event, from_berth, to_berth, phase, timestamp) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (headcode, direction, event, from_berth, to_berth, phase, now),
+        )
+        db.commit()
+        db.close()
+
     def log_raw_event(self, event_type: str, source: str, data: str):
         """Log a raw TD/TRUST message for debugging and analysis."""
         now = datetime.now(timezone.utc).isoformat()
@@ -165,6 +193,27 @@ class HistoryLogger:
         else:
             rows = db.execute(
                 "SELECT * FROM train_passages ORDER BY created_at DESC LIMIT ?", (limit,)
+            ).fetchall()
+        db.close()
+        return [dict(r) for r in rows]
+
+    def get_train_events(self, headcode: str = None, since: str = None, limit: int = 200) -> list[dict]:
+        """Query train berth stepping events for calibration."""
+        db = sqlite3.connect(str(self.db_path))
+        db.row_factory = sqlite3.Row
+        if headcode:
+            rows = db.execute(
+                "SELECT * FROM train_events WHERE headcode = ? ORDER BY timestamp ASC LIMIT ?",
+                (headcode, limit),
+            ).fetchall()
+        elif since:
+            rows = db.execute(
+                "SELECT * FROM train_events WHERE timestamp >= ? ORDER BY timestamp ASC LIMIT ?",
+                (since, limit),
+            ).fetchall()
+        else:
+            rows = db.execute(
+                "SELECT * FROM train_events ORDER BY timestamp DESC LIMIT ?", (limit,)
             ).fetchall()
         db.close()
         return [dict(r) for r in rows]

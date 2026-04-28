@@ -34,6 +34,7 @@ def run_predictor(config: dict, with_api: bool = False):
     tracker = TrainTracker(config)
     inferrer = CrossingInferrer(config)
     history = HistoryLogger()
+    tracker.history = history
 
     last_feed_time = None
 

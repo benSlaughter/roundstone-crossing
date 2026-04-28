@@ -15,8 +15,9 @@ logger = logging.getLogger("crossing.tracker")
 class TrainTracker:
     """Tracks trains approaching/passing the crossing based on TD and TRUST data."""
 
-    def __init__(self, config: dict):
+    def __init__(self, config: dict, history=None):
         self.config = config
+        self.history = history
         self.trains: dict[str, TrackedTrain] = {}  # keyed by headcode
         self._load_berth_zones()
         self._load_station_berths()
@@ -120,6 +121,17 @@ class TrainTracker:
                 logger.info(f"🚂 {headcode} ({train.direction.value if train.direction else '?'}): "
                             f"{train.phase.value} → {new_phase.value} (berth {to_berth})")
             train.phase = new_phase
+
+        # Log berth step for calibration data
+        if self.history:
+            self.history.log_train_event(
+                headcode=headcode,
+                event="step",
+                from_berth=from_berth,
+                to_berth=to_berth,
+                phase=train.phase.value if train.phase else None,
+                direction=train.direction.value if train.direction else None,
+            )
 
         # Predict when train will be at crossing
         if new_phase in (TrainPhase.APPROACHING, TrainPhase.STRIKE_IN):
