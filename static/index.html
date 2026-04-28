@@ -693,6 +693,12 @@
       return r.json();
     }
 
+    function esc(str) {
+      const d = document.createElement('div');
+      d.textContent = str;
+      return d.innerHTML;
+    }
+
     // Berth positions on the schematic (percentage from left edge)
     // Real geography: Angmering (west, ~14%) — CROSSING (~27%) — Goring (east, ~86%)
     // Crossing is ~400m east of Angmering, ~2.5km west of Goring.
@@ -845,7 +851,7 @@
           trainsList.innerHTML = data.active_trains.map(t => `
             <div class="train">
               <div>
-                <span class="train-hc">${t.headcode}</span>
+                <span class="train-hc">${esc(t.headcode)}</span>
                 <span class="train-info">${DIRECTION_LABELS[t.direction] || '?'}</span>
               </div>
               <span class="phase-badge phase-${t.phase}">${t.phase.replace('_', ' ')}</span>
@@ -888,7 +894,7 @@
           return `
             <div class="recent-train">
               <div>
-                <span class="recent-train-hc">${p.headcode}</span>
+                <span class="recent-train-hc">${esc(p.headcode)}</span>
                 <span class="recent-train-dir">${dir}</span>
               </div>
               <span class="recent-train-time">${time}</span>
@@ -990,11 +996,11 @@
           const dirArrow = s.direction === 'east' ? '↗' : s.direction === 'west' ? '↙' : '';
           return `<tr>
             <td style="color:${s.direction === 'east' ? '#60a5fa' : '#f472b6'}">${dirArrow}</td>
-            <td><strong>${s.headcode}</strong></td>
+            <td><strong>${esc(s.headcode)}</strong></td>
             <td>${arr}</td>
             <td>${dep}</td>
-            <td>${s.origin}</td>
-            <td>${s.destination}</td>
+            <td>${esc(s.origin)}</td>
+            <td>${esc(s.destination)}</td>
             <td>${statusBadge}</td>
           </tr>`;
         }).join('');
@@ -1006,11 +1012,43 @@
     updateRecentTrains();
     updateHistory();
 
-    // Poll every 3 seconds for status + diagram, every 15 for history/trains
-    setInterval(updateStatus, 3000);
-    setInterval(updateDiagram, 3000);
-    setInterval(updateRecentTrains, 15000);
-    setInterval(updateHistory, 15000);
+    // Pause polling when tab is hidden to save battery/bandwidth
+    let statusInterval, diagramInterval, historyInterval, trainInterval;
+
+    function startPolling() {
+        statusInterval = setInterval(updateStatus, 3000);
+        diagramInterval = setInterval(updateDiagram, 3000);
+        historyInterval = setInterval(updateRecentTrains, 15000);
+        trainInterval = setInterval(updateHistory, 15000);
+    }
+
+    function stopPolling() {
+        clearInterval(statusInterval);
+        clearInterval(diagramInterval);
+        clearInterval(historyInterval);
+        clearInterval(trainInterval);
+    }
+
+    document.addEventListener('visibilitychange', () => {
+        if (document.hidden) {
+            stopPolling();
+            if (upcomingInterval) {
+                clearInterval(upcomingInterval);
+                upcomingInterval = null;
+            }
+        } else {
+            // Refresh immediately when tab becomes visible again
+            updateStatus();
+            updateDiagram();
+            startPolling();
+            if (upcomingVisible) {
+                updateUpcoming();
+                upcomingInterval = setInterval(updateUpcoming, 30000);
+            }
+        }
+    });
+
+    startPolling();
   </script>
 </body>
 </html>
