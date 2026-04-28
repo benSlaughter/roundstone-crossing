@@ -53,6 +53,7 @@ GET /predictions   — Upcoming trains + predicted closure windows
 GET /next?station= — Upcoming services at a station (ANG or GBS)
 GET /history       — Query historical open/close intervals
 GET /stats         — Summary statistics
+GET /health        — System health (uptime, feed status, DB size)
 ```
 
 ## Architecture

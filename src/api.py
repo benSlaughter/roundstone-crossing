@@ -1,7 +1,9 @@
 """
-API server — exposes crossing status, predictions, and history.
+API server — exposes crossing status, predictions, health, and history.
 """
 
+import os
+from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import FastAPI, Query
@@ -13,6 +15,7 @@ from .history import HistoryLogger
 from .tracker import TrainTracker
 
 STATIC_DIR = Path(__file__).parent.parent / "static"
+_START_TIME = datetime.now(timezone.utc)
 
 
 def create_app(tracker: TrainTracker, inferrer: CrossingInferrer, history: HistoryLogger,
@@ -96,6 +99,47 @@ def create_app(tracker: TrainTracker, inferrer: CrossingInferrer, history: Histo
         if not rtt_client:
             return {"error": "RTT not available"}
         return {"services": rtt_client.get_upcoming(station, limit)}
+
+    @app.get("/health")
+    async def health():
+        """System health: uptime, feed status, DB size, tracked trains."""
+        now = datetime.now(timezone.utc)
+        uptime_secs = (now - _START_TIME).total_seconds()
+
+        # Feed status
+        feed_time = inferrer.status.last_feed_message
+        feed_age = (now - feed_time).total_seconds() if feed_time else None
+        stale_threshold = inferrer._timing.get("stale_threshold_secs", 300)
+
+        # DB size
+        db_path = history.db_path
+        db_size_mb = round(db_path.stat().st_size / (1024 * 1024), 2) if db_path.exists() else 0
+
+        # Train count
+        with tracker._lock:
+            total_trains = len(tracker.trains)
+            active_count = sum(
+                1 for t in tracker.trains.values()
+                if t.phase.value not in ("cleared", "lost")
+            )
+
+        return {
+            "status": "healthy" if feed_age is not None and feed_age < stale_threshold else "degraded",
+            "uptime_secs": round(uptime_secs),
+            "started_at": _START_TIME.isoformat(),
+            "feed": {
+                "last_message": feed_time.isoformat() if feed_time else None,
+                "age_secs": round(feed_age) if feed_age is not None else None,
+                "stale": feed_age is not None and feed_age > stale_threshold,
+            },
+            "crossing_state": inferrer.status.state.value,
+            "trains": {
+                "active": active_count,
+                "total_tracked": total_trains,
+            },
+            "db_size_mb": db_size_mb,
+            "rtt_available": rtt_client is not None,
+        }
 
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 

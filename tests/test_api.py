@@ -98,3 +98,25 @@ def test_next_with_rtt(tracker, inferrer, history_db):
     assert "services" in data
     assert len(data["services"]) == 1
     mock_rtt.get_upcoming.assert_called_once_with("ANG", 5)
+
+
+def test_health(client):
+    resp = client.get("/health")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["status"] in ("healthy", "degraded")
+    assert "uptime_secs" in data
+    assert "started_at" in data
+    assert "feed" in data
+    assert "trains" in data
+    assert "db_size_mb" in data
+    assert isinstance(data["trains"]["active"], int)
+    assert isinstance(data["trains"]["total_tracked"], int)
+
+
+def test_health_degraded_without_feed(client):
+    resp = client.get("/health")
+    data = resp.json()
+    # No feed messages have been received, so status should be degraded
+    assert data["status"] == "degraded"
+    assert data["feed"]["last_message"] is None
