@@ -602,10 +602,10 @@
       </div>
       <table class="upcoming-table">
         <thead>
-          <tr><th>Train</th><th>Arrives</th><th>Departs</th><th>From</th><th>To</th><th>Status</th></tr>
+          <tr><th></th><th>Train</th><th>Arrives</th><th>Departs</th><th>From</th><th>To</th><th>Status</th></tr>
         </thead>
         <tbody id="upcoming-body">
-          <tr><td colspan="6" style="color:#71717a">Select Upcoming tab to load…</td></tr>
+          <tr><td colspan="7" style="color:#71717a">Select Upcoming tab to load…</td></tr>
         </tbody>
       </table>
     </div>
@@ -975,7 +975,7 @@
         const data = await fetchJSON(`/next?station=${upcomingStation}&limit=8`);
         const body = document.getElementById('upcoming-body');
         if (!data.services || data.services.length === 0) {
-          body.innerHTML = '<tr><td colspan="6" style="color:#71717a">No upcoming services</td></tr>';
+          body.innerHTML = '<tr><td colspan="7" style="color:#71717a">No upcoming services</td></tr>';
           return;
         }
         body.innerHTML = data.services.map(s => {
@@ -987,7 +987,9 @@
           const badgeClass = statusMap[s.status] || '';
           const statusText = s.status ? s.status.replace('_', ' ').toLowerCase() : '';
           const statusBadge = statusText ? `<span class="status-badge ${badgeClass}">${statusText}</span>` : '';
+          const dirArrow = s.direction === 'east' ? '↗' : s.direction === 'west' ? '↙' : '';
           return `<tr>
+            <td style="color:${s.direction === 'east' ? '#60a5fa' : '#f472b6'}">${dirArrow}</td>
             <td><strong>${s.headcode}</strong></td>
             <td>${arr}</td>
             <td>${dep}</td>

@@ -217,10 +217,29 @@ class RTTClient:
                 origin = origin_list[0].get("location", {}).get("description", "") if origin_list else ""
                 dest = dest_list[0].get("location", {}).get("description", "") if dest_list else ""
 
+                # Direction: platform 1 = east (up), platform 2 = west (down)
+                # Fallback: infer from destination
+                if platform == "1":
+                    direction = "east"
+                elif platform == "2":
+                    direction = "west"
+                else:
+                    east_destinations = ("Brighton", "Worthing", "Hove", "Hastings", "Eastbourne",
+                                         "Lewes", "Horsham", "London", "Victoria", "Gatwick",
+                                         "Croydon", "Clapham")
+                    west_destinations = ("Littlehampton", "Portsmouth", "Southampton", "Bognor", "Chichester", "Havant")
+                    if any(d in dest for d in east_destinations):
+                        direction = "east"
+                    elif any(d in dest for d in west_destinations):
+                        direction = "west"
+                    else:
+                        direction = ""
+
                 results.append({
                     "headcode": headcode,
                     "station": station_name,
                     "platform": platform,
+                    "direction": direction,
                     "arrival": arr_display,
                     "arrival_scheduled": sched_arr_display,
                     "departure": dep_display,
