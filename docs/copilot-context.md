@@ -123,9 +123,6 @@ STALE_DATA ←── (any state, if feed connection lost for >5 min) ───�
 - Total typical closure: 2-3 minutes per train
 - Signaller-controlled — actual timing varies with practice
 
-### Owner / Environment
-- Developer: Ben (guybrush), macOS, VSCode
+### Environment
 - Python 3.12 venv at `.venv/`
-- Other projects: `~/projects/home-assistant/`, `~/projects/personal-assistant/`, `~/projects/waitrose/`, `~/projects/sainsburys-cli-mcp/`
-- Home Assistant running on HA Green (homeassistant.local)
-- Will eventually integrate with HA via MQTT for notifications
+- Will eventually integrate with Home Assistant via MQTT for notifications
