@@ -4,6 +4,7 @@ Correlates TD berth steps with TRUST train identities.
 """
 
 import logging
+import threading
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -19,6 +20,7 @@ class TrainTracker:
         self.config = config
         self.history = history
         self.trains: dict[str, TrackedTrain] = {}  # keyed by headcode
+        self._lock = threading.Lock()
         self._load_berth_zones()
         self._load_station_berths()
 
@@ -64,86 +66,87 @@ class TrainTracker:
 
     def handle_td_step(self, from_berth: str, to_berth: str, headcode: str, timestamp: datetime):
         """Process a TD berth step message. Updates the tracked train's position."""
-        if not headcode or headcode.strip() == "":
-            return
+        with self._lock:
+            if not headcode or headcode.strip() == "":
+                return
 
-        # Only care about berths near our crossing
-        if to_berth not in self.all_relevant_berths and from_berth not in self.all_relevant_berths:
-            return
+            # Only care about berths near our crossing
+            if to_berth not in self.all_relevant_berths and from_berth not in self.all_relevant_berths:
+                return
 
-        now = timestamp or datetime.now(timezone.utc)
+            now = timestamp or datetime.now(timezone.utc)
 
-        # Get or create tracked train
-        train = self.trains.get(headcode)
-        if not train:
-            train = TrackedTrain(headcode=headcode, last_berth=to_berth, last_berth_time=now)
-            self.trains[headcode] = train
-            logger.info(f"🚂 New train spotted: {headcode} at berth {to_berth}")
+            # Get or create tracked train
+            train = self.trains.get(headcode)
+            if not train:
+                train = TrackedTrain(headcode=headcode, last_berth=to_berth, last_berth_time=now)
+                self.trains[headcode] = train
+                logger.info(f"🚂 New train spotted: {headcode} at berth {to_berth}")
 
-        train.last_berth = to_berth
-        train.last_berth_time = now
-        train.last_update = now
+            train.last_berth = to_berth
+            train.last_berth_time = now
+            train.last_update = now
 
-        # Clear sub_position when leaving a station berth
-        if from_berth in self.station_berths and to_berth not in self.station_berths:
-            train.sub_position = None
+            # Clear sub_position when leaving a station berth
+            if from_berth in self.station_berths and to_berth not in self.station_berths:
+                train.sub_position = None
 
-        # Set sub_position when entering a station berth
-        if to_berth in self.station_berths:
-            sb = self.station_berths[to_berth]
-            train.sub_position = "entry"
-            train.station = sb.get("station")
+            # Set sub_position when entering a station berth
+            if to_berth in self.station_berths:
+                sb = self.station_berths[to_berth]
+                train.sub_position = "entry"
+                train.station = sb.get("station")
 
-        # If train has no direction yet, try to infer from from_berth
-        hint_direction = train.direction
-        if not hint_direction and from_berth:
-            _, from_dir = self._classify_berth(from_berth)
-            if from_dir:
-                hint_direction = from_dir
+            # If train has no direction yet, try to infer from from_berth
+            hint_direction = train.direction
+            if not hint_direction and from_berth:
+                _, from_dir = self._classify_berth(from_berth)
+                if from_dir:
+                    hint_direction = from_dir
 
-        # Determine direction and phase from the berth
-        new_phase, direction = self._classify_berth(to_berth, hint_direction)
+            # Determine direction and phase from the berth
+            new_phase, direction = self._classify_berth(to_berth, hint_direction)
 
-        # Don't allow phase regressions (e.g. cleared/at_crossing → approaching)
-        phase_order = {
-            TrainPhase.APPROACHING: 0, TrainPhase.STRIKE_IN: 1,
-            TrainPhase.AT_STATION: 1,  # Same level as strike_in (station is within that zone)
-            TrainPhase.AT_CROSSING: 2, TrainPhase.CLEARED: 3,
-        }
-        if (new_phase and train.phase and
-                phase_order.get(new_phase, 0) < phase_order.get(train.phase, 0)):
-            return
+            # Don't allow phase regressions (e.g. cleared/at_crossing → approaching)
+            phase_order = {
+                TrainPhase.APPROACHING: 0, TrainPhase.STRIKE_IN: 1,
+                TrainPhase.AT_STATION: 1,  # Same level as strike_in (station is within that zone)
+                TrainPhase.AT_CROSSING: 2, TrainPhase.CLEARED: 3,
+            }
+            if (new_phase and train.phase and
+                    phase_order.get(new_phase, 0) < phase_order.get(train.phase, 0)):
+                return
 
-        if direction:
-            train.direction = direction
-        if new_phase:
-            if new_phase != train.phase:
-                logger.info(f"🚂 {headcode} ({train.direction.value if train.direction else '?'}): "
-                            f"{train.phase.value} → {new_phase.value} (berth {to_berth})")
-            train.phase = new_phase
+            if direction:
+                train.direction = direction
+            if new_phase:
+                if new_phase != train.phase:
+                    logger.info(f"🚂 {headcode} ({train.direction.value if train.direction else '?'}): "
+                                f"{train.phase.value} → {new_phase.value} (berth {to_berth})")
+                train.phase = new_phase
 
-        # Log berth step for calibration data
-        if self.history:
-            self.history.log_train_event(
-                headcode=headcode,
-                event="step",
-                from_berth=from_berth,
-                to_berth=to_berth,
-                phase=train.phase.value if train.phase else None,
-                direction=train.direction.value if train.direction else None,
-            )
+            # Log berth step for calibration data
+            if self.history:
+                self.history.log_train_event(
+                    headcode=headcode,
+                    event="step",
+                    from_berth=from_berth,
+                    to_berth=to_berth,
+                    phase=train.phase.value if train.phase else None,
+                    direction=train.direction.value if train.direction else None,
+                )
 
-        # Predict when train will be at crossing
-        if new_phase in (TrainPhase.APPROACHING, TrainPhase.STRIKE_IN):
-            train.predicted_at_crossing = self._estimate_arrival(train)
-            train.confidence = 0.7 if new_phase == TrainPhase.STRIKE_IN else 0.5
+            # Predict when train will be at crossing
+            if new_phase in (TrainPhase.APPROACHING, TrainPhase.STRIKE_IN):
+                train.predicted_at_crossing = self._estimate_arrival(train)
+                train.confidence = 0.7 if new_phase == TrainPhase.STRIKE_IN else 0.5
 
-        elif new_phase == TrainPhase.AT_CROSSING:
-            train.predicted_at_crossing = now
-            train.confidence = 0.9
+            elif new_phase == TrainPhase.AT_CROSSING:
+                train.predicted_at_crossing = now
+                train.confidence = 0.9
 
-        elif new_phase == TrainPhase.CLEARED:
-            train.confidence = 0.9
+            elif new_phase == TrainPhase.CLEARED:
+                train.confidence = 0.9
 
     def handle_td_cancel(self, berth: str, headcode: str, timestamp: datetime):
         """Handle a TD berth cancel (CB_MSG). Removes train if it matches the cancelled berth."""
@@ -163,71 +166,72 @@ class TrainTracker:
     def handle_trust_movement(self, train_id: str, stanox: str, event_type: str,
                                actual_time: datetime, headcode: Optional[str] = None):
         """Process a TRUST train movement message. Used for identity, timing, and clearing."""
-        trust_config = self.config.get("trust", {}).get("timing_points", [])
+        with self._lock:
+            trust_config = self.config.get("trust", {}).get("timing_points", [])
 
-        # Match on STANOX and event type (arrival/departure)
-        trust_event = "arrival" if event_type == "ARRIVAL" else "departure"
-        matching = [tp for tp in trust_config
-                    if tp.get("stanox") == stanox and tp.get("event", "departure") == trust_event]
-        if not matching:
-            return
+            # Match on STANOX and event type (arrival/departure)
+            trust_event = "arrival" if event_type == "ARRIVAL" else "departure"
+            matching = [tp for tp in trust_config
+                        if tp.get("stanox") == stanox and tp.get("event", "departure") == trust_event]
+            if not matching:
+                return
 
-        hc = headcode or (train_id[2:6] if len(train_id) >= 6 else train_id[:4])
-        if not hc:
-            return
+            hc = headcode or (train_id[2:6] if len(train_id) >= 6 else train_id[:4])
+            if not hc:
+                return
 
-        # If train already tracked with a known direction, prefer the matching config entry
-        existing = self.trains.get(hc)
-        if existing and existing.direction and len(matching) > 1:
-            directed = [tp for tp in matching if tp.get("direction") == existing.direction.value]
-            tp = directed[0] if directed else matching[0]
-        else:
-            tp = matching[0]
+            # If train already tracked with a known direction, prefer the matching config entry
+            existing = self.trains.get(hc)
+            if existing and existing.direction and len(matching) > 1:
+                directed = [tp for tp in matching if tp.get("direction") == existing.direction.value]
+                tp = directed[0] if directed else matching[0]
+            else:
+                tp = matching[0]
 
-        direction = Direction(tp["direction"])
-        action = tp.get("action", "predict")
-        station = tp.get("station", tp.get("tiploc", ""))
+            direction = Direction(tp["direction"])
+            action = tp.get("action", "predict")
+            station = tp.get("station", tp.get("tiploc", ""))
 
-        # Get or create train
-        train = self.trains.get(hc)
-        if train:
-            train.train_id = train_id
-            train.last_update = actual_time
-        else:
-            train = TrackedTrain(
-                headcode=hc,
-                train_id=train_id,
-                direction=direction,
-                phase=TrainPhase.APPROACHING,
-                confidence=0.4,
-                last_update=actual_time,
-            )
-            self.trains[hc] = train
+            # Get or create train
+            train = self.trains.get(hc)
+            if train:
+                train.train_id = train_id
+                train.last_update = actual_time
+            else:
+                train = TrackedTrain(
+                    headcode=hc,
+                    train_id=train_id,
+                    direction=direction,
+                    phase=TrainPhase.APPROACHING,
+                    confidence=0.4,
+                    last_update=actual_time,
+                )
+                self.trains[hc] = train
 
-        if action == "clear":
-            # Westbound arrival at Angmering P2 = past the crossing
-            if train.phase != TrainPhase.CLEARED:
-                logger.info(f"🚂 {hc} ({direction.value}): "
-                            f"{train.phase.value} → cleared (TRUST arrival at {station})")
-                train.phase = TrainPhase.CLEARED
-                train.confidence = 0.95
+            if action == "clear":
+                # Westbound arrival at Angmering P2 = past the crossing
+                if train.phase != TrainPhase.CLEARED:
+                    logger.info(f"🚂 {hc} ({direction.value}): "
+                                f"{train.phase.value} → cleared (TRUST arrival at {station})")
+                    train.phase = TrainPhase.CLEARED
+                    train.confidence = 0.95
+                    train.direction = direction
+                    train.sub_position = None
+                return
+
+            if action == "at_station":
+                # TRUST at_station is now just identity + direction enrichment
+                # RTT handles the actual station display via sub_position
                 train.direction = direction
-                train.sub_position = None
-            return
+                train.station = station
+                return
 
-        if action == "at_station":
-            # TRUST at_station is now just identity + direction enrichment
-            # RTT handles the actual station display via sub_position
-            train.direction = direction
-            train.station = station
-            return
-
-        if action == "predict":
-            train.direction = direction
-            # Estimate crossing time from TRUST offset
-            offset = tp.get("offset_secs", 120)
-            from datetime import timedelta
-            train.predicted_at_crossing = actual_time + timedelta(seconds=offset)
+            if action == "predict":
+                train.direction = direction
+                # Estimate crossing time from TRUST offset
+                offset = tp.get("offset_secs", 120)
+                from datetime import timedelta
+                train.predicted_at_crossing = actual_time + timedelta(seconds=offset)
 
     def handle_rtt_update(self, headcode: str, station: str, platform: str,
                           status: str, origin_codes: list = None, dest_codes: list = None):
@@ -334,9 +338,10 @@ class TrainTracker:
 
     def get_active_trains(self) -> list[TrackedTrain]:
         """Return trains that are relevant to the crossing (not cleared or stale)."""
-        self._cleanup_stale()
-        return [t for t in self.trains.values()
-                if t.phase not in (TrainPhase.CLEARED, TrainPhase.LOST)]
+        with self._lock:
+            self._cleanup_stale()
+            return [t for t in self.trains.values()
+                    if t.phase not in (TrainPhase.CLEARED, TrainPhase.LOST)]
 
     def _cleanup_stale(self):
         """Mark stale trains as LOST, remove very old ones."""

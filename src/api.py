@@ -2,7 +2,6 @@
 API server — exposes crossing status, predictions, and history.
 """
 
-from datetime import datetime
 from pathlib import Path
 
 from fastapi import FastAPI, Query
@@ -34,8 +33,10 @@ def create_app(tracker: TrainTracker, inferrer: CrossingInferrer, history: Histo
     async def diagram():
         """All tracked trains with berth positions for the schematic diagram."""
         from .models import TrainPhase
+        with tracker._lock:
+            trains_snapshot = dict(tracker.trains)
         trains = []
-        for hc, t in tracker.trains.items():
+        for hc, t in trains_snapshot.items():
             if t.phase in (TrainPhase.LOST,):
                 continue
             trains.append({
