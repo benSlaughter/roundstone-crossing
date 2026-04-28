@@ -257,3 +257,47 @@ class TestOpeningPredictedState:
         # _last_clear_time was set to NOW when trains were active
         expected_open = NOW + timedelta(seconds=8)  # post_clearance_secs
         assert abs((status.predicted_change - expected_open).total_seconds()) < 2
+
+
+@freeze_time(NOW)
+class TestBarriersStayClosedForConsecutiveTrains:
+    """Barriers should not bounce CLOSED → CLOSING → CLOSED for back-to-back trains."""
+
+    def test_closed_stays_closed_when_next_train_in_strike_in(self, inferrer, make_train):
+        """After AT_CROSSING train clears, a STRIKE_IN train keeps barriers down."""
+        at_crossing = make_train(headcode="1A00", phase=TrainPhase.AT_CROSSING)
+        inferrer.update([at_crossing], FEED_RECENT)
+        assert inferrer.status.state == CrossingState.CLOSED_INFERRED
+
+        # First train clears, second is in strike-in
+        strike_in = make_train(
+            headcode="2B00",
+            phase=TrainPhase.STRIKE_IN,
+            predicted_at_crossing=NOW + timedelta(seconds=30),
+        )
+        status = inferrer.update([strike_in], FEED_RECENT)
+        # Should stay CLOSED, not bounce to CLOSING_PREDICTED
+        assert status.state == CrossingState.CLOSED_INFERRED
+
+    def test_closed_stays_closed_when_next_train_at_station(self, inferrer, make_train):
+        """After AT_CROSSING, an AT_STATION train keeps barriers down."""
+        at_crossing = make_train(headcode="1A00", phase=TrainPhase.AT_CROSSING)
+        inferrer.update([at_crossing], FEED_RECENT)
+        assert inferrer.status.state == CrossingState.CLOSED_INFERRED
+
+        at_station = make_train(
+            headcode="2B00",
+            phase=TrainPhase.AT_STATION,
+            predicted_at_crossing=NOW + timedelta(seconds=60),
+        )
+        status = inferrer.update([at_station], FEED_RECENT)
+        assert status.state == CrossingState.CLOSED_INFERRED
+
+    def test_fresh_strike_in_without_prior_closed_shows_closing(self, inferrer, make_train):
+        """STRIKE_IN from OPEN state should still show CLOSING_PREDICTED."""
+        strike_in = make_train(
+            phase=TrainPhase.STRIKE_IN,
+            predicted_at_crossing=NOW + timedelta(seconds=30),
+        )
+        status = inferrer.update([strike_in], FEED_RECENT)
+        assert status.state == CrossingState.CLOSING_PREDICTED
