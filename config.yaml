@@ -23,7 +23,7 @@ railway:
       stanox: "87998"
     east:
       name: "Goring-by-Sea"
-      crs: "GOR"
+      crs: "GBS"
       tiploc: "GORNGBS"
       stanox: "87997"
 
@@ -145,5 +145,5 @@ rtt:
 
 # API server
 api:
-  host: "0.0.0.0"
+  host: "127.0.0.1"    # Use 0.0.0.0 for LAN access
   port: 8590

@@ -23,7 +23,7 @@ class RTTClient:
     def __init__(self, stations: list[str], poll_interval: int = 15):
         """
         Args:
-            stations: CRS codes to poll (e.g. ["ANG", "GOR"])
+            stations: CRS codes to poll (e.g. ["ANG", "GBS"])
             poll_interval: seconds between poll cycles
         """
         self.stations = stations

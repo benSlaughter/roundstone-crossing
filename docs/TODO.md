@@ -33,6 +33,9 @@
 
 - [ ] **Home Assistant integration** — publish state to MQTT, create HA sensors, notifications, Jarvis voice announcements, MagicMirror widget
 - [x] **Web dashboard** — simple HTML page showing live crossing status, countdown, next trains
+- [x] **Direction arrows** — show train direction in upcoming panel
+- [x] **Train event logging** — log berth steps for calibration
+- [x] **Code audit remediation** — thread safety, feed reconnect, CB_MSG handling, XSS fixes, docs update
 - [ ] **Historical analytics** — average closure duration by hour/day, busiest times, longest closures
 - [ ] **Push notifications** — "crossing closing in 2 minutes" via HA, Telegram, or similar
 - [ ] **Multi-crossing support** — the architecture is generic enough to support other local crossings (Angmering Station Road crossing, etc.) — just add berth zones to config

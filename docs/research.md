@@ -25,7 +25,7 @@ Build a system to monitor the Roundstone Level Crossing in Angmering, integrate 
 
 ### Railway Line
 - **Route**: West Coastway Line (Brighton → Worthing → Littlehampton → Portsmouth)
-- **Between stations**: Angmering (ANG) and Goring-by-Sea (GOR)
+- **Between stations**: Angmering (ANG) and Goring-by-Sea (GBS)
 - **Distance from Brighton**: ~15 miles 44 chains (25.0 km)
 - **Operator**: Southern (Govia Thameslink Railway)
 - **Platforms at Angmering**: 2
@@ -167,7 +167,7 @@ conn.subscribe('/topic/TD_ALL_SIG_AREA', id=1, ack='auto')
   - `GET /departures/ANG/10` — next 10 departures from Angmering
   - `GET /arrivals/ANG/10` — next 10 arrivals
   - `GET /all/ANG/10` — both
-  - `GET /next/ANG/to/GOR` — next train Angmering → Goring
+  - `GET /next/ANG/to/GBS` — next train Angmering → Goring
   - `GET /service/{serviceId}` — full service details
 - All require `?accessToken=YOUR_TOKEN`
 
@@ -295,7 +295,7 @@ None of the existing integrations handle **level crossing prediction**. This wou
 | Station | CRS Code | TIPLOC | STANOX | Notes |
 |---|---|---|---|---|
 | Angmering | ANG | ANGMRNG | 87998 | West side of crossing |
-| Goring-by-Sea | GOR | GORNGBS | 87997 | East side of crossing |
+| Goring-by-Sea | GBS | GORNGBS | 87997 | East side of crossing |
 | Worthing | WRH | WRTHING | — | Major station east |
 | Littlehampton | LIT | LTLHMPN | — | Junction station west |
 | Ford | FOD | FORD | — | Junction for Arun Valley line |

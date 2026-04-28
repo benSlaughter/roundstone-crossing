@@ -7,15 +7,14 @@ Predicts when the barriers at Roundstone Level Crossing (Angmering, West Sussex)
 1. **Listens** to Network Rail's real-time STOMP feeds (Train Describer + TRUST)
 2. **Tracks** individual trains approaching the crossing from both directions
 3. **Infers** crossing barrier state (open/closing/closed/opening) with confidence levels
-4. **Learns** actual timings over time to improve prediction accuracy
-5. **Logs** every state change to SQLite for historical analysis
+4. **Logs** every state change to SQLite for historical analysis
 
 ## Crossing Details
 
 - **Location**: Roundstone Level Crossing, B2140, East Preston/Angmering
 - **Type**: MCB-CCTV (Manually Controlled Barriers with CCTV)
 - **Railway**: West Coastway Line (BLI1), 70 mph
-- **Between**: Angmering (ANG) ↔ Goring-by-Sea (GOR)
+- **Between**: Angmering (ANG) ↔ Goring-by-Sea (GBS)
 - **Traffic**: ~176 trains/day
 
 ## Setup
@@ -39,11 +38,21 @@ python -m src.main          # Start the predictor
 python -m src.main --api    # Start with API server
 ```
 
+### Web Dashboard
+Open http://localhost:8590 in your browser for a live dashboard with:
+- Schematic track diagram with train positions
+- Upcoming trains panel (from Realtime Trains)
+- Crossing state history
+
 ### API
 ```
-GET /status       — Current crossing state + confidence
-GET /predictions  — Upcoming trains + predicted closure windows
-GET /history      — Query historical open/close intervals
+GET /              — Web dashboard
+GET /status        — Current crossing state + confidence
+GET /diagram       — Tracked trains with berth positions (for schematic)
+GET /predictions   — Upcoming trains + predicted closure windows
+GET /next?station= — Upcoming services at a station (ANG or GBS)
+GET /history       — Query historical open/close intervals
+GET /stats         — Summary statistics
 ```
 
 ## Architecture
@@ -66,4 +75,4 @@ NROD STOMP ──→ Train Tracker ──→ Crossing Inferrer ──→ API + L
 
 ## Licence
 
-MIT
+[MIT](LICENSE)

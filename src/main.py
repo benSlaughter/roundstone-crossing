@@ -46,7 +46,7 @@ def run_predictor(config: dict, with_api: bool = False):
 
     # Start RTT polling
     rtt_config = config.get("rtt", {})
-    rtt_stations = rtt_config.get("stations", ["ANG", "GOR"])
+    rtt_stations = rtt_config.get("stations", ["ANG", "GBS"])
     rtt_interval = rtt_config.get("poll_interval", 15)
     rtt = RTTClient(stations=rtt_stations, poll_interval=rtt_interval)
     rtt.set_callback(lambda **kw: tracker.handle_rtt_update(**{
@@ -135,7 +135,7 @@ def main():
             line = line.strip()
             if line and not line.startswith("#") and "=" in line:
                 key, _, value = line.partition("=")
-                os.environ.setdefault(key.strip(), value.strip())
+                os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
 
     # Logging
     logging.basicConfig(
