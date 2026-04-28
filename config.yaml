@@ -105,7 +105,7 @@ trust:
       stanox: "87997"
       direction: "up"
       event: "arrival"
-      action: "at_station"
+      action: "clear"            # Eastbound arrival at Goring = past the crossing
       station: "Goring"
     - tiploc: "GORNGBS"
       stanox: "87997"
