@@ -112,7 +112,7 @@ def create_app(tracker: TrainTracker, inferrer: CrossingInferrer, history: Histo
         stale_threshold = inferrer._timing.get("stale_threshold_secs", 300)
 
         # DB size
-        db_path = history.db_path
+        db_path = Path(history.db_path)
         db_size_mb = round(db_path.stat().st_size / (1024 * 1024), 2) if db_path.exists() else 0
 
         # Train count
