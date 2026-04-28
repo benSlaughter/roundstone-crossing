@@ -43,7 +43,7 @@ def run_predictor(config: dict, with_api: bool = False):
         nonlocal last_feed_time
         last_feed_time = ts
 
-    feed = NRODFeed(tracker, on_message_callback=on_feed_message)
+    feed = NRODFeed(tracker, history=history, on_message_callback=on_feed_message)
 
     # Start RTT polling
     rtt_config = config.get("rtt", {})

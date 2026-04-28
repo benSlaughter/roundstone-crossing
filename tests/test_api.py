@@ -120,3 +120,61 @@ def test_health_degraded_without_feed(client):
     # No feed messages have been received, so status should be degraded
     assert data["status"] == "degraded"
     assert data["feed"]["last_message"] is None
+
+
+# ── SF endpoints ─────────────────────────────────────────────────────
+
+def test_sf_events_empty(client):
+    resp = client.get("/sf")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data == {"events": []}
+
+
+def test_sf_events_with_data(history_db, tracker, inferrer):
+    from freezegun import freeze_time
+    with freeze_time("2025-06-15 10:00:00", tz_offset=0):
+        history_db.record_sf_event("LA", "16", "43")
+        history_db.record_sf_event("LA", "2F", "FF")
+
+    from src.api import create_app
+    app = create_app(tracker, inferrer, history_db)
+    client = TestClient(app)
+    resp = client.get("/sf")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data["events"]) == 2
+    addresses = {ev["address"] for ev in data["events"]}
+    assert addresses == {"16", "2F"}
+    for ev in data["events"]:
+        assert "data_hex" in ev
+        assert "data_bin" in ev
+        assert "timestamp" in ev
+
+
+def test_sf_summary_empty(client):
+    resp = client.get("/sf/summary")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data == {"addresses": []}
+
+
+def test_sf_summary_with_data(history_db, tracker, inferrer):
+    from freezegun import freeze_time
+    with freeze_time("2025-06-15 10:00:00", tz_offset=0):
+        history_db.record_sf_event("LA", "16", "43")
+        history_db.record_sf_event("LA", "16", "44")
+        history_db.record_sf_event("LA", "2F", "FF")
+
+    from src.api import create_app
+    app = create_app(tracker, inferrer, history_db)
+    client = TestClient(app)
+    resp = client.get("/sf/summary")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data["addresses"]) == 2
+    addr_map = {a["address"]: a for a in data["addresses"]}
+    assert addr_map["16"]["change_count"] == 2
+    assert addr_map["2F"]["change_count"] == 1
+    assert "first_seen" in addr_map["16"]
+    assert "last_seen" in addr_map["16"]

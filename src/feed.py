@@ -21,12 +21,14 @@ logger = logging.getLogger("crossing.feed")
 class NRODListener(stomp.ConnectionListener):
     """Handles incoming STOMP messages from Network Rail."""
 
-    def __init__(self, tracker: TrainTracker, on_message_callback=None, on_disconnect_callback=None):
+    def __init__(self, tracker: TrainTracker, history=None, on_message_callback=None, on_disconnect_callback=None):
         self.tracker = tracker
+        self.history = history
         self.on_message_callback = on_message_callback
         self.on_disconnect_callback = on_disconnect_callback
         self.connected = False
         self.last_message_time: datetime | None = None
+        self.last_heartbeat: datetime | None = None
 
     def on_message(self, frame):
         try:
@@ -108,6 +110,37 @@ class NRODListener(stomp.ConnectionListener):
                         if headcode and from_berth:
                             self.tracker.handle_td_cancel(from_berth, headcode, timestamp)
 
+            # S-Class signalling messages
+            if "SF_MSG" in msg:
+                data = msg["SF_MSG"]
+                area = data.get("area_id", "")
+                if area == self.tracker.area_id and self.history:
+                    address = data.get("address", "")
+                    sf_data = data.get("data", "")
+                    if address and sf_data:
+                        self.history.record_sf_event(area, address, sf_data)
+
+            if "SG_MSG" in msg:
+                # Signalling refresh — bulk snapshot of S-class state on connection
+                data = msg["SG_MSG"]
+                area = data.get("area_id", "")
+                if area == self.tracker.area_id and self.history:
+                    address = data.get("address", "")
+                    sf_data = data.get("data", "")
+                    if address and sf_data:
+                        self.history.record_sf_event(area, address, sf_data)
+                    logger.debug(f"SG refresh: area={area} addr={address}")
+
+            if "SH_MSG" in msg:
+                # Signalling refresh finished
+                data = msg["SH_MSG"]
+                area = data.get("area_id", "")
+                logger.debug(f"SG refresh complete for area {area}")
+
+            if "CT_MSG" in msg:
+                # Heartbeat
+                self.last_heartbeat = datetime.now(timezone.utc)
+
     def _handle_trust(self, messages: list):
         """Process TRUST train movement messages."""
         for msg in messages:
@@ -169,9 +202,9 @@ class NRODListener(stomp.ConnectionListener):
 class NRODFeed:
     """Manages the STOMP connection to Network Rail Open Data."""
 
-    def __init__(self, tracker: TrainTracker, on_message_callback=None):
+    def __init__(self, tracker: TrainTracker, history=None, on_message_callback=None):
         self.tracker = tracker
-        self.listener = NRODListener(tracker, on_message_callback, on_disconnect_callback=self._reconnect)
+        self.listener = NRODListener(tracker, history=history, on_message_callback=on_message_callback, on_disconnect_callback=self._reconnect)
         self.connection: stomp.Connection | None = None
         self._running = False
         self._reconnect_backoffs = [5, 10, 30, 60, 120]

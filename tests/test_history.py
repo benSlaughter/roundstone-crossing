@@ -20,7 +20,7 @@ class TestDBInit:
             "SELECT name FROM sqlite_master WHERE type='table'"
         ).fetchall()}
         db.close()
-        for t in ("state_intervals", "train_passages", "raw_events", "train_events"):
+        for t in ("state_intervals", "train_passages", "raw_events", "train_events", "sf_events"):
             assert t in tables
 
     def test_indexes_exist(self, history_db):
@@ -35,6 +35,8 @@ class TestDBInit:
             "idx_events_timestamp",
             "idx_train_events_ts",
             "idx_train_events_hc",
+            "idx_sf_events_ts",
+            "idx_sf_events_addr",
         }
         assert expected.issubset(indexes)
 
@@ -297,3 +299,81 @@ class TestGetStats:
             )
         stats = history_db.get_stats()
         assert stats["avg_closure_duration_secs"] is None
+
+
+# ---------------------------------------------------------------------------
+# 10. SF events (S-Class signalling)
+# ---------------------------------------------------------------------------
+
+class TestSfEvents:
+    @freeze_time("2025-06-15 10:00:00", tz_offset=0)
+    def test_record_sf_event_stores_correctly(self, history_db):
+        history_db.record_sf_event("LA", "16", "43")
+        events = history_db.get_sf_events()
+        assert len(events) == 1
+        ev = events[0]
+        assert ev["area_id"] == "LA"
+        assert ev["address"] == "16"
+        assert ev["data_hex"] == "43"
+        assert ev["data_bin"] == "01000011"
+
+    @freeze_time("2025-06-15 10:00:00", tz_offset=0)
+    def test_record_sf_event_hex_to_bin_conversion(self, history_db):
+        cases = [("00", "00000000"), ("FF", "11111111"), ("A5", "10100101")]
+        for hex_val, expected_bin in cases:
+            history_db.record_sf_event("LA", "10", hex_val)
+        events = history_db.get_sf_events()
+        # DESC order, so newest first
+        bins = [ev["data_bin"] for ev in reversed(events)]
+        assert bins == ["00000000", "11111111", "10100101"]
+
+    @freeze_time("2025-06-15 10:00:00", tz_offset=0)
+    def test_get_sf_events_filter_by_address(self, history_db):
+        history_db.record_sf_event("LA", "16", "43")
+        history_db.record_sf_event("LA", "2F", "FF")
+        history_db.record_sf_event("LA", "16", "44")
+
+        events = history_db.get_sf_events(address="16")
+        assert len(events) == 2
+        assert all(ev["address"] == "16" for ev in events)
+
+    def test_get_sf_events_filter_by_since(self, history_db):
+        with freeze_time("2025-06-15 08:00:00", tz_offset=0):
+            history_db.record_sf_event("LA", "16", "01")
+        with freeze_time("2025-06-15 10:00:00", tz_offset=0):
+            history_db.record_sf_event("LA", "16", "02")
+        with freeze_time("2025-06-15 12:00:00", tz_offset=0):
+            history_db.record_sf_event("LA", "16", "03")
+
+        events = history_db.get_sf_events(since="2025-06-15T09:00:00+00:00")
+        assert len(events) == 2
+        hex_values = {ev["data_hex"] for ev in events}
+        assert hex_values == {"02", "03"}
+
+    @freeze_time("2025-06-15 10:00:00", tz_offset=0)
+    def test_get_sf_events_respects_limit(self, history_db):
+        for i in range(5):
+            history_db.record_sf_event("LA", "16", f"{i:02X}")
+
+        events = history_db.get_sf_events(limit=2)
+        assert len(events) == 2
+
+    def test_get_sf_summary(self, history_db):
+        with freeze_time("2025-06-15 08:00:00", tz_offset=0):
+            history_db.record_sf_event("LA", "16", "01")
+        with freeze_time("2025-06-15 09:00:00", tz_offset=0):
+            history_db.record_sf_event("LA", "16", "02")
+        with freeze_time("2025-06-15 10:00:00", tz_offset=0):
+            history_db.record_sf_event("LA", "16", "03")
+        with freeze_time("2025-06-15 09:30:00", tz_offset=0):
+            history_db.record_sf_event("LA", "2F", "FF")
+
+        summary = history_db.get_sf_summary()
+        assert len(summary) == 2
+        # Ordered by change_count DESC
+        assert summary[0]["address"] == "16"
+        assert summary[0]["change_count"] == 3
+        assert summary[0]["first_seen"] is not None
+        assert summary[0]["last_seen"] is not None
+        assert summary[1]["address"] == "2F"
+        assert summary[1]["change_count"] == 1

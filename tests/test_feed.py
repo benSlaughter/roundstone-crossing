@@ -155,3 +155,67 @@ class TestHandleTrust:
         listener._handle_trust(messages)
         kwargs = mock_tracker.handle_trust_movement.call_args[1]
         assert kwargs["headcode"] == "9Z45"
+
+
+# ── _handle_td: S-Class signalling messages ──────────────────────────
+
+class TestHandleSfMessages:
+
+    @pytest.fixture
+    def mock_history(self):
+        return MagicMock()
+
+    @pytest.fixture
+    def listener_with_history(self, mock_tracker, mock_history):
+        return NRODListener(mock_tracker, history=mock_history)
+
+    def test_sf_msg_correct_area_recorded(self, listener_with_history, mock_history):
+        messages = [{"SF_MSG": {
+            "area_id": "LA", "address": "16", "data": "43",
+        }}]
+        listener_with_history._handle_td(messages)
+        mock_history.record_sf_event.assert_called_once_with("LA", "16", "43")
+
+    def test_sf_msg_wrong_area_ignored(self, listener_with_history, mock_history):
+        messages = [{"SF_MSG": {
+            "area_id": "WX", "address": "16", "data": "43",
+        }}]
+        listener_with_history._handle_td(messages)
+        mock_history.record_sf_event.assert_not_called()
+
+    def test_sf_msg_no_history_ignored(self, listener):
+        messages = [{"SF_MSG": {
+            "area_id": "LA", "address": "16", "data": "43",
+        }}]
+        # Should not raise even though listener.history is None
+        listener._handle_td(messages)
+
+    def test_sg_msg_recorded(self, listener_with_history, mock_history):
+        messages = [{"SG_MSG": {
+            "area_id": "LA", "address": "2F", "data": "FF",
+        }}]
+        listener_with_history._handle_td(messages)
+        mock_history.record_sf_event.assert_called_once_with("LA", "2F", "FF")
+
+    def test_sh_msg_no_error(self, listener_with_history):
+        messages = [{"SH_MSG": {
+            "area_id": "LA",
+        }}]
+        # Should not raise
+        listener_with_history._handle_td(messages)
+
+    def test_ct_msg_updates_heartbeat(self, listener_with_history):
+        assert listener_with_history.last_heartbeat is None
+        messages = [{"CT_MSG": {
+            "area_id": "LA", "report_time": "1030",
+        }}]
+        listener_with_history._handle_td(messages)
+        assert isinstance(listener_with_history.last_heartbeat, datetime)
+
+    def test_sf_msg_missing_data_ignored(self, listener_with_history, mock_history):
+        messages = [
+            {"SF_MSG": {"area_id": "LA", "address": "", "data": "43"}},
+            {"SF_MSG": {"area_id": "LA", "address": "16", "data": ""}},
+        ]
+        listener_with_history._handle_td(messages)
+        mock_history.record_sf_event.assert_not_called()

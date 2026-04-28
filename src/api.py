@@ -141,6 +141,20 @@ def create_app(tracker: TrainTracker, inferrer: CrossingInferrer, history: Histo
             "rtt_available": rtt_client is not None,
         }
 
+    @app.get("/sf/summary")
+    async def sf_summary():
+        """Summary of S-Class addresses: change counts, first/last seen."""
+        return {"addresses": history.get_sf_summary()}
+
+    @app.get("/sf")
+    async def sf_events(
+        since: str = Query(None, description="ISO datetime to query from"),
+        address: str = Query(None, description="Filter by hex address"),
+        limit: int = Query(100, ge=1, le=1000),
+    ):
+        """Recent S-Class signalling events."""
+        return {"events": history.get_sf_events(since=since, address=address, limit=limit)}
+
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
     return app

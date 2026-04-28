@@ -80,12 +80,25 @@ class HistoryLogger:
             )
         """)
 
+        db.execute("""
+            CREATE TABLE IF NOT EXISTS sf_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp TEXT NOT NULL,
+                area_id TEXT NOT NULL,
+                address TEXT NOT NULL,
+                data_hex TEXT NOT NULL,
+                data_bin TEXT NOT NULL
+            )
+        """)
+
         # Indexes for common queries
         db.execute("CREATE INDEX IF NOT EXISTS idx_intervals_started ON state_intervals(started_at)")
         db.execute("CREATE INDEX IF NOT EXISTS idx_passages_created ON train_passages(created_at)")
         db.execute("CREATE INDEX IF NOT EXISTS idx_events_timestamp ON raw_events(timestamp)")
         db.execute("CREATE INDEX IF NOT EXISTS idx_train_events_ts ON train_events(timestamp)")
         db.execute("CREATE INDEX IF NOT EXISTS idx_train_events_hc ON train_events(headcode, timestamp)")
+        db.execute("CREATE INDEX IF NOT EXISTS idx_sf_events_ts ON sf_events(timestamp)")
+        db.execute("CREATE INDEX IF NOT EXISTS idx_sf_events_addr ON sf_events(address, timestamp)")
 
         db.commit()
         db.close()
@@ -237,3 +250,54 @@ class HistoryLogger:
         stats["avg_closure_duration_secs"] = round(row[0], 1) if row[0] else None
         db.close()
         return stats
+
+    def record_sf_event(self, area_id: str, address: str, data_hex: str):
+        """Record an S-Class signalling state change."""
+        # Convert hex to 8-bit binary string
+        data_bin = format(int(data_hex, 16), '08b')
+        now = datetime.now(timezone.utc).isoformat()
+        db = sqlite3.connect(str(self.db_path))
+        db.execute(
+            "INSERT INTO sf_events (timestamp, area_id, address, data_hex, data_bin) VALUES (?, ?, ?, ?, ?)",
+            (now, area_id, address, data_hex, data_bin),
+        )
+        db.commit()
+        db.close()
+        logger.debug(f"SF event: area={area_id} addr={address} data=0x{data_hex} ({data_bin})")
+
+    def get_sf_events(self, since: str = None, address: str = None, limit: int = 100) -> list[dict]:
+        """Query S-Class signalling events."""
+        db = sqlite3.connect(str(self.db_path))
+        db.row_factory = sqlite3.Row
+        conditions = []
+        params = []
+        if since:
+            conditions.append("timestamp >= ?")
+            params.append(since)
+        if address:
+            conditions.append("address = ?")
+            params.append(address)
+        where = " AND ".join(conditions)
+        if where:
+            where = "WHERE " + where
+        params.append(limit)
+        rows = db.execute(
+            f"SELECT * FROM sf_events {where} ORDER BY timestamp DESC LIMIT ?", params
+        ).fetchall()
+        db.close()
+        return [dict(r) for r in rows]
+
+    def get_sf_summary(self) -> list[dict]:
+        """Summary of S-Class addresses seen: distinct addresses, change counts, last seen."""
+        db = sqlite3.connect(str(self.db_path))
+        db.row_factory = sqlite3.Row
+        rows = db.execute("""
+            SELECT address, COUNT(*) as change_count,
+                   MAX(timestamp) as last_seen,
+                   MIN(timestamp) as first_seen
+            FROM sf_events
+            GROUP BY address
+            ORDER BY change_count DESC
+        """).fetchall()
+        db.close()
+        return [dict(r) for r in rows]
