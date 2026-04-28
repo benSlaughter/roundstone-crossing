@@ -1,0 +1,389 @@
+const STATE_CONFIG = {
+  open:               { icon: '🟢', label: 'Open',              sub: 'Barriers are up — road is clear' },
+  closing_predicted:  { icon: '🟡', label: 'Closing Soon',      sub: 'Train approaching — barriers expected to lower' },
+  closed_inferred:    { icon: '🔴', label: 'Closed',            sub: 'Train at crossing — barriers are down' },
+  opening_predicted:  { icon: '🟡', label: 'Opening Soon',      sub: 'Train clearing — barriers expected to raise' },
+  stale_data:         { icon: '⚠️', label: 'No Data',           sub: 'Feed connection lost — status unknown' },
+  unknown:            { icon: '❓', label: 'Unknown',            sub: 'Waiting for data…' },
+};
+
+const DIRECTION_LABELS = { up: '↗ East', down: '↙ West' };
+
+function formatDuration(secs) {
+  if (secs == null) return '';
+  if (secs < 60) return `${Math.round(secs)}s`;
+  const m = Math.floor(secs / 60);
+  const s = Math.round(secs % 60);
+  return s > 0 ? `${m}m ${s}s` : `${m}m`;
+}
+
+function formatTime(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  return d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+}
+
+async function fetchJSON(url) {
+  const r = await fetch(url);
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  return r.json();
+}
+
+function esc(str) {
+  const d = document.createElement('div');
+  d.textContent = str;
+  return d.innerHTML;
+}
+
+// Berth positions on the schematic (percentage from left edge)
+// Real geography: Angmering (west, ~14%) — CROSSING (~27%) — Goring (east, ~86%)
+// Crossing is ~400m east of Angmering, ~2.5km west of Goring.
+const BERTH_POSITIONS = {
+  // Eastbound (up) berths — west to east
+  'A027': 2,    // far west approach
+  '0040': 4,    // west of Angmering
+  '0038': 8,    // west of Angmering P1 (entry side for eastbound)
+  '0036': 45,   // just past crossing (eastbound)
+  '0034': 70,   // between crossing and Goring
+  '0032': 75,   // west of Goring (entry side for eastbound)
+  '0030': 97,   // far east of Goring
+  // Westbound (down) berths — east to west
+  '0033': 97,   // far east of Goring
+  '0035': 93,   // east of Goring P2 (entry side for westbound)
+  '0037': 55,   // between crossing and Goring
+  '0039': 39,   // approaching crossing (westbound)
+  '0041': 25,   // east of Angmering P2 (entry side for westbound)
+};
+
+// Which line (up=P1/top, down=P2/bottom) each berth belongs to
+const BERTH_LINE = {
+  '0040': 'up', '0038': 'up',
+  '0036': 'up', '0034': 'up', '0032': 'up', '0030': 'up',
+  'A027': 'down',
+  '0033': 'down', '0035': 'down', '0037': 'down',
+  '0039': 'down', '0041': 'down',
+};
+
+// Station positions for AT_STATION trains
+const STATION_POSITIONS = {
+  'Angmering': { up: 17, down: 17 },
+  'Goring':    { up: 83, down: 83 },
+};
+
+// Station berth sub-positions — entry vs at_platform positions (% from left)
+const STATION_BERTH_POSITIONS = {
+  '0038': { entry: 8, at_platform: 17 },    // Eastbound Angmering P1
+  '0041': { entry: 25, at_platform: 17 },   // Westbound Angmering P2
+  '0032': { entry: 75, at_platform: 83 },   // Eastbound Goring P1
+  '0035': { entry: 93, at_platform: 83 },   // Westbound Goring P2
+};
+
+// Render berth tick marks (once on load)
+function renderBerthTicks() {
+  const area = document.getElementById('track-area');
+  for (const [berth, pct] of Object.entries(BERTH_POSITIONS)) {
+    const line = BERTH_LINE[berth] || 'up';
+    // Tick mark
+    const tick = document.createElement('div');
+    tick.className = `berth-tick ${line}`;
+    tick.style.left = pct + '%';
+    area.appendChild(tick);
+    // Label (hidden by default, toggled via .show-berths)
+    const label = document.createElement('div');
+    label.className = `berth-label ${line}`;
+    label.style.left = pct + '%';
+    label.textContent = berth;
+    area.appendChild(label);
+  }
+  // Station ticks — show where AT_STATION trains display
+  for (const [name, pos] of Object.entries(STATION_POSITIONS)) {
+    for (const line of ['up', 'down']) {
+      const tick = document.createElement('div');
+      tick.className = `berth-tick station-tick ${line}`;
+      tick.style.left = pos[line] + '%';
+      area.appendChild(tick);
+      const label = document.createElement('div');
+      label.className = `berth-label station-tick-label ${line}`;
+      label.style.left = pos[line] + '%';
+      label.textContent = line === 'up' ? 'P1' : 'P2';
+      area.appendChild(label);
+    }
+  }
+}
+renderBerthTicks();
+
+async function updateDiagram() {
+  try {
+    const data = await fetchJSON('/diagram');
+
+    // Update crossing light
+    const light = document.getElementById('crossing-light');
+    light.className = 'crossing-light ' + data.state;
+
+    // Render trains on track
+    const area = document.getElementById('track-area');
+    area.querySelectorAll('.track-train').forEach(el => el.remove());
+
+    for (const t of data.trains) {
+      let pct, line;
+      const berth = t.last_berth;
+
+      if (berth && STATION_BERTH_POSITIONS[berth] && t.sub_position) {
+        // Station berth with sub-position — use entry or at_platform position
+        const sp = STATION_BERTH_POSITIONS[berth];
+        pct = sp[t.sub_position] ?? sp.entry;
+        line = t.direction || BERTH_LINE[berth] || 'up';
+      } else if (t.phase === 'at_station' && t.station && STATION_POSITIONS[t.station]) {
+        // Fallback: at_station without station berth info
+        line = t.direction || 'up';
+        pct = STATION_POSITIONS[t.station][line] || STATION_POSITIONS[t.station].up;
+      } else {
+        // Position from berth
+        if (!berth || !(berth in BERTH_POSITIONS)) continue;
+        pct = BERTH_POSITIONS[berth];
+        line = t.direction || BERTH_LINE[berth] || 'up';
+      }
+
+      const el = document.createElement('div');
+      el.className = `track-train ${line} phase-${t.phase}`;
+      el.style.left = pct + '%';
+      el.textContent = t.headcode;
+      area.appendChild(el);
+    }
+  } catch (e) { /* ignore */ }
+}
+
+async function updateStatus() {
+  try {
+    const data = await fetchJSON('/status');
+    const cfg = STATE_CONFIG[data.state] || STATE_CONFIG.unknown;
+
+    const card = document.getElementById('status-card');
+    card.className = 'status-card ' + data.state;
+
+    document.getElementById('status-icon').textContent = cfg.icon;
+    document.getElementById('status-label').textContent = cfg.label;
+    document.getElementById('status-sub').textContent = cfg.sub;
+
+    // ETA
+    const eta = document.getElementById('status-eta');
+    if (data.seconds_until_change != null && data.seconds_until_change > 0) {
+      const nextLabel = STATE_CONFIG[data.predicted_next_state]?.label || '';
+      const trainCount = (data.active_trains || []).length;
+      const multi = trainCount > 1 ? ` · ${trainCount} trains` : '';
+      eta.textContent = `${nextLabel} in ~${formatDuration(data.seconds_until_change)}${multi}`;
+    } else {
+      eta.textContent = '';
+    }
+
+    // Confidence
+    const pct = Math.round(data.confidence * 100);
+    document.getElementById('confidence-text').textContent = `${pct}% confidence`;
+    document.getElementById('confidence-fill').style.width = `${pct}%`;
+
+    // Trains
+    const trainsSection = document.getElementById('trains-section');
+    const trainsList = document.getElementById('trains-list');
+    if (data.active_trains && data.active_trains.length > 0) {
+      trainsSection.style.display = '';
+      trainsList.innerHTML = data.active_trains.map(t => `
+        <div class="train">
+          <div>
+            <span class="train-hc">${esc(t.headcode)}</span>
+            <span class="train-info">${DIRECTION_LABELS[t.direction] || '?'}</span>
+          </div>
+          <span class="phase-badge phase-${t.phase}">${t.phase.replace('_', ' ')}</span>
+        </div>
+      `).join('');
+    } else {
+      trainsSection.style.display = 'none';
+    }
+
+    document.getElementById('footer-text').textContent =
+      `Live · updated ${formatTime(new Date().toISOString())}`;
+    document.querySelector('footer').classList.remove('disconnected');
+
+  } catch (e) {
+    document.getElementById('footer-text').textContent = 'Disconnected';
+    document.querySelector('footer').classList.add('disconnected');
+  }
+}
+
+async function updateRecentTrains() {
+  try {
+    const data = await fetchJSON('/history?type=passages&limit=20');
+    const list = document.getElementById('recent-trains-list');
+    if (!data.passages || data.passages.length === 0) {
+      list.innerHTML = '<div class="empty">No trains recorded yet</div>';
+      return;
+    }
+    // Deduplicate by headcode+direction+observed_at_crossing (the earlier bug logged duplicates)
+    const seen = new Set();
+    const unique = data.passages.filter(p => {
+      const key = `${p.headcode}-${p.direction}-${p.observed_at_crossing}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    }).slice(0, 5);
+
+    list.innerHTML = unique.map(p => {
+      const dir = DIRECTION_LABELS[p.direction] || '?';
+      const time = formatTime(p.observed_clear || p.observed_at_crossing);
+      return `
+        <div class="recent-train">
+          <div>
+            <span class="recent-train-hc">${esc(p.headcode)}</span>
+            <span class="recent-train-dir">${dir}</span>
+          </div>
+          <span class="recent-train-time">${time}</span>
+        </div>
+      `;
+    }).join('');
+  } catch (e) { /* ignore */ }
+}
+
+async function updateHistory() {
+  try {
+    const data = await fetchJSON('/history?limit=8');
+    const list = document.getElementById('history-list');
+    if (!data.intervals || data.intervals.length === 0) {
+      list.innerHTML = '<div class="empty">No history yet</div>';
+      return;
+    }
+    list.innerHTML = data.intervals.map(iv => {
+      const cfg = STATE_CONFIG[iv.state] || {};
+      const dur = iv.duration_secs ? formatDuration(iv.duration_secs) : 'ongoing';
+      return `
+        <div class="history-item">
+          <div>
+            <span>${cfg.icon || '?'}</span>
+            <span class="history-state">${cfg.label || iv.state}</span>
+            <span class="history-duration">· ${dur}</span>
+          </div>
+          <span class="history-time">${formatTime(iv.started_at)}</span>
+        </div>
+      `;
+    }).join('');
+  } catch (e) { /* ignore */ }
+}
+
+// Initial load
+// Upcoming trains panel
+let upcomingStation = 'ANG';
+let upcomingVisible = false;
+let upcomingInterval = null;
+
+function switchTab(name, btn) {
+  // Hide all tab contents
+  document.getElementById('tab-map').style.display = 'none';
+  document.getElementById('tab-upcoming').style.display = 'none';
+  document.getElementById('tab-history').style.display = 'none';
+  document.getElementById('tab-info').style.display = 'none';
+  // Deactivate all tab buttons
+  document.querySelectorAll('.tab-bar button').forEach(b => b.classList.remove('active'));
+  // Show selected tab
+  document.getElementById('tab-' + name).style.display = 'block';
+  btn.classList.add('active');
+  // Manage upcoming polling
+  if (name === 'upcoming') {
+    if (!upcomingVisible) {
+      upcomingVisible = true;
+      updateUpcoming();
+      upcomingInterval = setInterval(updateUpcoming, 30000);
+    }
+  } else {
+    upcomingVisible = false;
+    if (upcomingInterval) {
+      clearInterval(upcomingInterval);
+      upcomingInterval = null;
+    }
+  }
+}
+
+function switchUpcomingStation(crs, btn) {
+  upcomingStation = crs;
+  btn.parentElement.querySelectorAll('.sub-tab').forEach(t => t.classList.remove('active'));
+  btn.classList.add('active');
+  updateUpcoming();
+}
+
+function switchHistorySub(name, btn) {
+  document.getElementById('history-sub-crossing').style.display = name === 'crossing' ? 'block' : 'none';
+  document.getElementById('history-sub-trains').style.display = name === 'trains' ? 'block' : 'none';
+  btn.parentElement.querySelectorAll('.sub-tab').forEach(t => t.classList.remove('active'));
+  btn.classList.add('active');
+}
+
+async function updateUpcoming() {
+  try {
+    const data = await fetchJSON(`/next?station=${upcomingStation}&limit=8`);
+    const body = document.getElementById('upcoming-body');
+    if (!data.services || data.services.length === 0) {
+      body.innerHTML = '<tr><td colspan="7" style="color:#71717a">No upcoming services</td></tr>';
+      return;
+    }
+    body.innerHTML = data.services.map(s => {
+      let arr = s.arrival || '—';
+      if (s.arrival_scheduled) arr += `<span class="delayed">${s.arrival_scheduled}</span>`;
+      let dep = s.departure || '—';
+      if (s.departure_scheduled) dep += `<span class="delayed">${s.departure_scheduled}</span>`;
+      const statusMap = { 'APPROACHING': 'approaching', 'AT_PLATFORM': 'at_platform', 'ARRIVING': 'approaching' };
+      const badgeClass = statusMap[s.status] || '';
+      const statusText = s.status ? s.status.replace('_', ' ').toLowerCase() : '';
+      const statusBadge = statusText ? `<span class="status-badge ${badgeClass}">${statusText}</span>` : '';
+      const dirArrow = s.direction === 'east' ? '↗' : s.direction === 'west' ? '↙' : '';
+      return `<tr>
+        <td style="color:${s.direction === 'east' ? '#60a5fa' : '#f472b6'}">${dirArrow}</td>
+        <td><strong>${esc(s.headcode)}</strong></td>
+        <td>${arr}</td>
+        <td>${dep}</td>
+        <td>${esc(s.origin)}</td>
+        <td>${esc(s.destination)}</td>
+        <td>${statusBadge}</td>
+      </tr>`;
+    }).join('');
+  } catch (e) { /* ignore */ }
+}
+
+updateStatus();
+updateDiagram();
+updateRecentTrains();
+updateHistory();
+
+// Pause polling when tab is hidden to save battery/bandwidth
+let statusInterval, diagramInterval, historyInterval, trainInterval;
+
+function startPolling() {
+    statusInterval = setInterval(updateStatus, 3000);
+    diagramInterval = setInterval(updateDiagram, 3000);
+    historyInterval = setInterval(updateRecentTrains, 15000);
+    trainInterval = setInterval(updateHistory, 15000);
+}
+
+function stopPolling() {
+    clearInterval(statusInterval);
+    clearInterval(diagramInterval);
+    clearInterval(historyInterval);
+    clearInterval(trainInterval);
+}
+
+document.addEventListener('visibilitychange', () => {
+    if (document.hidden) {
+        stopPolling();
+        if (upcomingInterval) {
+            clearInterval(upcomingInterval);
+            upcomingInterval = null;
+        }
+    } else {
+        // Refresh immediately when tab becomes visible again
+        updateStatus();
+        updateDiagram();
+        startPolling();
+        if (upcomingVisible) {
+            updateUpcoming();
+            upcomingInterval = setInterval(updateUpcoming, 30000);
+        }
+    }
+});
+
+startPolling();

@@ -1,0 +1,534 @@
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  background: #0f1117;
+  color: #e4e4e7;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 2rem 1rem;
+}
+h1 {
+  font-size: 1.1rem;
+  font-weight: 500;
+  color: #a1a1aa;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  margin-bottom: 1.5rem;
+}
+
+/* Main status card */
+.status-card {
+  width: 100%;
+  max-width: 600px;
+  box-sizing: border-box;
+  border-radius: 1rem;
+  padding: 2.5rem 2rem;
+  text-align: center;
+  margin-bottom: 1.5rem;
+  transition: background 0.6s ease;
+}
+.status-card.open { background: #052e16; border: 1px solid #166534; }
+.status-card.closed_inferred { background: #450a0a; border: 1px solid #991b1b; }
+.status-card.closing_predicted { background: #431407; border: 1px solid #9a3412; }
+.status-card.opening_predicted { background: #1a2e05; border: 1px solid #4d7c0f; }
+.status-card.stale_data, .status-card.unknown { background: #1c1917; border: 1px solid #44403c; }
+
+.status-icon { font-size: 3.5rem; margin-bottom: 0.5rem; }
+.status-label {
+  font-size: 1.8rem;
+  font-weight: 700;
+  margin-bottom: 0.25rem;
+}
+.status-sub {
+  font-size: 0.95rem;
+  color: #a1a1aa;
+}
+.status-eta {
+  margin-top: 1rem;
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: #fbbf24;
+}
+
+/* Confidence bar */
+.confidence {
+  margin-top: 1rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  font-size: 0.8rem;
+  color: #71717a;
+}
+.confidence-bar {
+  width: 80px;
+  height: 4px;
+  background: #27272a;
+  border-radius: 2px;
+  overflow: hidden;
+}
+.confidence-fill {
+  height: 100%;
+  border-radius: 2px;
+  transition: width 0.4s ease;
+}
+.open .confidence-fill { background: #22c55e; }
+.closed_inferred .confidence-fill { background: #ef4444; }
+.closing_predicted .confidence-fill { background: #f97316; }
+.opening_predicted .confidence-fill { background: #84cc16; }
+
+/* Trains */
+.section {
+  width: 100%;
+  max-width: 480px;
+  margin-bottom: 1.5rem;
+}
+.section-title {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #71717a;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 0.5rem;
+}
+.train {
+  background: #18181b;
+  border: 1px solid #27272a;
+  border-radius: 0.5rem;
+  padding: 0.75rem 1rem;
+  margin-bottom: 0.5rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.train-hc {
+  font-family: "SF Mono", "Fira Code", monospace;
+  font-weight: 700;
+  font-size: 1rem;
+}
+.train-info {
+  font-size: 0.85rem;
+  color: #a1a1aa;
+}
+.phase-badge {
+  font-size: 0.7rem;
+  padding: 0.2rem 0.5rem;
+  border-radius: 0.25rem;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+.phase-approaching { background: #422006; color: #fb923c; }
+.phase-strike_in { background: #450a0a; color: #fca5a5; }
+.phase-at_crossing { background: #7f1d1d; color: #fef2f2; }
+.phase-at_station { background: #1a2e05; color: #d9f99d; }
+
+/* Recent trains */
+.recent-train {
+  background: #18181b;
+  border: 1px solid #27272a;
+  border-radius: 0.5rem;
+  padding: 0.6rem 1rem;
+  margin-bottom: 0.4rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.85rem;
+}
+.recent-train-hc {
+  font-family: "SF Mono", "Fira Code", monospace;
+  font-weight: 700;
+}
+.recent-train-dir {
+  color: #a1a1aa;
+  margin-left: 0.5rem;
+}
+.recent-train-time {
+  color: #71717a;
+  font-size: 0.8rem;
+}
+
+/* History */
+.history-item {
+  background: #18181b;
+  border: 1px solid #27272a;
+  border-radius: 0.5rem;
+  padding: 0.6rem 1rem;
+  margin-bottom: 0.4rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.85rem;
+}
+.history-state { font-weight: 600; }
+.history-time { color: #71717a; font-size: 0.8rem; }
+.history-duration { color: #a1a1aa; }
+
+.empty { color: #52525b; font-style: italic; font-size: 0.9rem; padding: 1rem 0; }
+
+.pulse {
+  display: inline-block;
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: #22c55e;
+  margin-right: 0.5rem;
+  animation: pulse 2s infinite;
+}
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+.disconnected .pulse { background: #ef4444; animation: none; }
+
+footer {
+  margin-top: auto;
+  padding-top: 2rem;
+  font-size: 0.75rem;
+  color: #3f3f46;
+}
+
+/* Tab bar */
+.tab-bar {
+  width: 100%;
+  max-width: 600px;
+  display: flex;
+  border-bottom: 2px solid #27272a;
+  margin-bottom: 0;
+}
+.tab-bar button {
+  flex: 1;
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: #71717a;
+  font-size: 0.8rem;
+  font-weight: 500;
+  padding: 0.6rem 0;
+  cursor: pointer;
+  transition: all 0.2s;
+  margin-bottom: -2px;
+}
+.tab-bar button:hover { color: #a1a1aa; }
+.tab-bar button.active { color: #e4e4e7; border-bottom-color: #3b82f6; }
+
+/* Legend (inside tab content) */
+.legend-panel {
+  display: none;
+  font-size: 0.82rem;
+  line-height: 1.7;
+}
+.legend-panel.visible { display: block; }
+.legend-panel dt {
+  font-weight: 700;
+  color: #e4e4e7;
+  margin-top: 0.4rem;
+}
+.legend-panel dt:first-child { margin-top: 0; }
+.legend-panel dd {
+  color: #a1a1aa;
+  margin-left: 0;
+  margin-bottom: 0.25rem;
+}
+.legend-section {
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: #52525b;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-top: 0.8rem;
+  margin-bottom: 0.2rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid #27272a;
+}
+.legend-section:first-child { border-top: none; margin-top: 0; padding-top: 0; }
+
+/* Track schematic */
+.schematic {
+  width: 100%;
+  max-width: 600px;
+  background: #18181b;
+  border: 1px solid #27272a;
+  border-top: none;
+  border-radius: 0 0 0.75rem 0.75rem;
+  padding: 1.25rem 1rem 1rem;
+  margin-bottom: 1.5rem;
+}
+.schematic-title {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #71717a;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 0.75rem;
+}
+.track-area {
+  position: relative;
+  height: 120px;
+}
+/* Track lines — full width */
+.track-line {
+  position: absolute;
+  height: 3px;
+  background: #3f3f46;
+  left: 0;
+  right: 0;
+  z-index: 1;
+}
+.track-up { top: 35px; }
+.track-down { top: 82px; }
+/* Direction arrows */
+.track-arrow {
+  position: absolute;
+  font-size: 0.55rem;
+  color: #52525b;
+  z-index: 3;
+}
+.arrow-up { top: 43px; right: 2px; }
+.arrow-down { top: 71px; left: 2px; }
+/* Hide arrows when berths are shown (they overlap) */
+.track-area.show-berths .track-arrow { display: none; }
+/* Station boxes — positioned inline on tracks */
+.station {
+  position: absolute;
+  top: 16px;
+  width: 60px;
+  height: 88px;
+  border: 1px dashed #3f3f46;
+  border-radius: 4px;
+  background: rgba(28, 25, 23, 0.85);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: space-between;
+  padding: 3px 2px;
+  z-index: 2;
+  transform: translateX(-50%);
+}
+.station-name {
+  font-size: 0.55rem;
+  font-weight: 700;
+  color: #a1a1aa;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+.station-plats {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  flex: 1;
+  justify-content: center;
+  gap: 18px;
+}
+.station-plat {
+  font-size: 0.45rem;
+  color: #52525b;
+}
+/* Crossing marker — positioned at correct % */
+.crossing-marker {
+  position: absolute;
+  transform: translateX(-50%);
+  top: 0;
+  bottom: 0;
+  width: 30px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  z-index: 4;
+}
+.crossing-road {
+  position: absolute;
+  top: 20px;
+  bottom: 20px;
+  width: 10px;
+  background: repeating-linear-gradient(
+    180deg,
+    #44403c 0px, #44403c 3px,
+    transparent 3px, transparent 6px
+  );
+  border-radius: 2px;
+  opacity: 0.5;
+}
+.crossing-light {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 2px solid #27272a;
+  z-index: 5;
+  transition: background 0.5s ease, box-shadow 0.5s ease;
+}
+.crossing-light.open { background: #22c55e; box-shadow: 0 0 8px #22c55e88; }
+.crossing-light.closed_inferred { background: #ef4444; box-shadow: 0 0 8px #ef444488; }
+.crossing-light.closing_predicted { background: #f97316; box-shadow: 0 0 8px #f9731688; }
+.crossing-light.opening_predicted { background: #84cc16; box-shadow: 0 0 8px #84cc1688; }
+.crossing-light.unknown, .crossing-light.stale_data { background: #52525b; }
+.crossing-label {
+  font-size: 0.5rem;
+  color: #71717a;
+  margin-top: 2px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  z-index: 5;
+}
+/* Berth tick marks */
+.berth-tick {
+  position: absolute;
+  width: 1px;
+  height: 5px;
+  background: #3f3f46;
+  z-index: 2;
+  transform: translateX(-50%);
+}
+.berth-tick.up { top: 32px; }
+.berth-tick.down { top: 83px; }
+.berth-tick.station-tick {
+  width: 2px;
+  height: 7px;
+  background: #a78bfa;
+}
+.berth-label {
+  position: absolute;
+  font-size: 0.4rem;
+  color: #3f3f46;
+  transform: translateX(-50%);
+  z-index: 2;
+  font-family: "SF Mono", "Fira Code", monospace;
+}
+.berth-label.up { top: 47px; }
+.berth-label.down { top: 65px; }
+/* Berth labels hidden by default, shown when .show-berths is on track-area */
+.berth-label { display: none; }
+.track-area.show-berths .berth-label { display: block; }
+/* Station tick labels hidden by default, shown with berths */
+.station-tick-label { color: #a78bfa; font-size: 0.45rem; }
+/* Toggle button in schematic title */
+.berth-toggle {
+  background: none;
+  border: 1px solid #27272a;
+  border-radius: 0.5rem;
+  color: #71717a;
+  font-size: 0.65rem;
+  padding: 0.2rem 0.5rem;
+  cursor: pointer;
+  margin-left: 0.5rem;
+  vertical-align: middle;
+}
+.berth-toggle:hover { color: #e4e4e7; border-color: #3f3f46; }
+/* Train indicators on track */
+.track-train {
+  position: absolute;
+  height: 18px;
+  border-radius: 3px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: "SF Mono", "Fira Code", monospace;
+  font-size: 0.6rem;
+  font-weight: 700;
+  color: #fff;
+  z-index: 6;
+  transition: left 1s ease, background 0.3s ease;
+  white-space: nowrap;
+  padding: 0 4px;
+  min-width: 36px;
+  transform: translateX(-50%);
+}
+.track-train.up { top: 26px; }
+.track-train.down { top: 73px; }
+.track-train.phase-approaching { background: #92400e; }
+.track-train.phase-strike_in { background: #991b1b; }
+.track-train.phase-at_crossing { background: #dc2626; }
+.track-train.phase-at_station { background: #4d7c0f; }
+.track-train.phase-cleared { background: #1e3a5f; opacity: 0.6; }
+/* Upcoming trains panel */
+.upcoming-panel {
+  display: none;
+  font-size: 0.75rem;
+}
+.upcoming-panel.visible { display: block; }
+.upcoming-panel h3 {
+  margin: 0 0 0.5rem 0;
+  font-size: 0.8rem;
+  color: #a1a1aa;
+}
+/* Sub-tabs (segmented control) */
+.sub-tabs {
+  display: flex;
+  background: #0f1117;
+  border-radius: 0.5rem;
+  padding: 0.2rem;
+  margin-bottom: 0.75rem;
+  gap: 0.15rem;
+}
+.sub-tab {
+  flex: 1;
+  background: transparent;
+  border: none;
+  border-radius: 0.375rem;
+  color: #52525b;
+  font-size: 0.72rem;
+  font-weight: 500;
+  padding: 0.35rem 0.5rem;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  text-align: center;
+}
+.sub-tab:hover { color: #a1a1aa; }
+.sub-tab.active {
+  background: #27272a;
+  color: #e4e4e7;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.3);
+}
+
+.upcoming-panel .station-tabs {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+.upcoming-panel .station-tab {
+  background: none;
+  border: 1px solid #27272a;
+  border-radius: 0.4rem;
+  color: #71717a;
+  font-size: 0.7rem;
+  padding: 0.15rem 0.5rem;
+  cursor: pointer;
+}
+.upcoming-panel .station-tab.active {
+  color: #e4e4e7;
+  border-color: #3f3f46;
+  background: #27272a;
+}
+.upcoming-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.upcoming-table th {
+  text-align: left;
+  color: #71717a;
+  font-weight: 500;
+  padding: 0.2rem 0.4rem;
+  border-bottom: 1px solid #27272a;
+  font-size: 0.65rem;
+}
+.upcoming-table td {
+  padding: 0.25rem 0.4rem;
+  color: #d4d4d8;
+  border-bottom: 1px solid #1f1f23;
+}
+.upcoming-table .delayed {
+  color: #f87171;
+  text-decoration: line-through;
+  font-size: 0.6rem;
+  margin-left: 0.3rem;
+}
+.upcoming-table .status-badge {
+  font-size: 0.55rem;
+  padding: 0.1rem 0.3rem;
+  border-radius: 0.25rem;
+  background: #27272a;
+  color: #a1a1aa;
+}
+.upcoming-table .status-badge.approaching { background: #92400e33; color: #fbbf24; }
+.upcoming-table .status-badge.at_platform { background: #4d7c0f33; color: #84cc16; }
