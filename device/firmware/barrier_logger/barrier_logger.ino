@@ -101,6 +101,8 @@ void handleRoot();
 void handleDownload();
 void handleTimeSync();
 void handleClear();
+void handleDebug();
+void handleDebugStream();
 String getTimestamp();
 String formatUptime(unsigned long ms);
 
@@ -385,6 +387,7 @@ static const char STATUS_PAGE_HTML[] PROGMEM = R"rawliteral(
 </table>
 <p>
   <a href="/download">Download Log (CSV)</a>
+  <a href="/debug">Live Debug</a>
   <a href="/clear" class="danger" onclick="return confirm('Clear all log data?')">Clear Log</a>
 </p>
 <p id="status">Time sync: waiting...</p>
@@ -423,6 +426,8 @@ void startAPMode() {
   server.on("/download", handleDownload);
   server.on("/time", handleTimeSync);
   server.on("/clear", handleClear);
+  server.on("/debug", handleDebug);
+  server.on("/debug/stream", handleDebugStream);
   server.begin();
 
   Serial.println("Web server started");
@@ -525,6 +530,143 @@ void handleClear() {
   Serial.println("Log file cleared");
   logEvent("CLEARED");
   server.send(200, "text/plain", "Log cleared. A CLEARED event has been recorded.");
+}
+
+// ===========================================================================
+// Debug / calibration page — live sensor readout for aiming and testing
+// ===========================================================================
+
+static const char DEBUG_PAGE_HTML[] PROGMEM = R"rawliteral(
+<!DOCTYPE html>
+<html>
+<head>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RXLogger Debug</title>
+<style>
+  body { font-family: monospace; max-width: 600px; margin: 20px auto; padding: 0 10px;
+         background: #1a1a2e; color: #e0e0e0; }
+  h1 { color: #00d4ff; }
+  .sensor-bar { width: 100%; height: 40px; background: #333; border-radius: 4px;
+                margin: 10px 0; overflow: hidden; }
+  .sensor-fill { height: 100%; transition: width 0.15s; border-radius: 4px; }
+  .light-on .sensor-fill { background: #ff4444; width: 100%; }
+  .light-off .sensor-fill { background: #444; width: 5%; }
+  .indicator { font-size: 3em; text-align: center; margin: 20px 0; }
+  .pulse-count { font-size: 1.5em; text-align: center; margin: 10px 0; }
+  table { border-collapse: collapse; width: 100%; margin: 10px 0; }
+  td, th { border: 1px solid #444; padding: 6px; text-align: left; }
+  th { background: #2a2a4e; }
+  .log { background: #111; padding: 10px; border-radius: 4px; height: 200px;
+         overflow-y: auto; font-size: 0.85em; white-space: pre; margin-top: 10px; }
+  a { color: #00d4ff; }
+  .open { color: #44ff44; }
+  .closed { color: #ff4444; }
+  .unknown { color: #ffaa00; }
+</style>
+</head>
+<body>
+<h1>Live Sensor Debug</h1>
+<p><a href="/">Back to status</a></p>
+
+<div class="indicator" id="light">-</div>
+<div class="sensor-bar" id="bar"><div class="sensor-fill"></div></div>
+
+<table>
+  <tr><th>Sensor GPIO</th><td id="gpio">-</td></tr>
+  <tr><th>Pulses (4s window)</th><td id="pulses">-</td></tr>
+  <tr><th>Detected State</th><td id="state">-</td></tr>
+  <tr><th>Threshold</th><td>%THRESHOLD% pulses in %WINDOW%ms</td></tr>
+  <tr><th>Samples</th><td id="samples">0</td></tr>
+</table>
+
+<h3>Event Log</h3>
+<div class="log" id="log"></div>
+
+<script>
+var samples = 0;
+var pulseTimestamps = [];
+var lastGpio = 0;
+var WINDOW = %WINDOW%;
+var THRESHOLD = %THRESHOLD%;
+
+function poll() {
+  fetch('/debug/stream')
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+      samples++;
+      var now = Date.now();
+
+      // Update GPIO display
+      document.getElementById('gpio').textContent = d.gpio ? 'HIGH (light)' : 'LOW (dark)';
+      var bar = document.getElementById('bar');
+      bar.className = 'sensor-bar ' + (d.gpio ? 'light-on' : 'light-off');
+
+      // Big indicator
+      var light = document.getElementById('light');
+      light.textContent = d.gpio ? 'LIGHT DETECTED' : 'dark';
+      light.style.color = d.gpio ? '#ff4444' : '#666';
+
+      // Track pulses (HIGH -> LOW transitions)
+      if (lastGpio === 1 && d.gpio === 0) {
+        pulseTimestamps.push(now);
+        addLog('Pulse detected');
+      }
+      lastGpio = d.gpio;
+
+      // Clean old pulses outside window
+      pulseTimestamps = pulseTimestamps.filter(function(t) { return now - t < WINDOW; });
+      var pc = pulseTimestamps.length;
+      document.getElementById('pulses').textContent = pc + ' / ' + THRESHOLD + ' needed';
+
+      // State detection
+      var stateEl = document.getElementById('state');
+      if (pc >= THRESHOLD) {
+        stateEl.textContent = 'CLOSED (flashing detected)';
+        stateEl.className = 'closed';
+      } else if (pc > 0) {
+        stateEl.textContent = 'DETECTING... (' + pc + ' pulses)';
+        stateEl.className = 'unknown';
+      } else {
+        stateEl.textContent = 'OPEN (no flashing)';
+        stateEl.className = 'open';
+      }
+
+      document.getElementById('samples').textContent = samples;
+    })
+    .catch(function(e) { addLog('ERROR: ' + e); });
+}
+
+function addLog(msg) {
+  var log = document.getElementById('log');
+  var time = new Date().toLocaleTimeString();
+  log.textContent += time + '  ' + msg + '\n';
+  log.scrollTop = log.scrollHeight;
+}
+
+addLog('Debug started — polling sensor every 200ms');
+addLog('Aim sensor at crossing light and watch for pulses');
+setInterval(poll, 200);
+</script>
+</body>
+</html>
+)rawliteral";
+
+void handleDebug() {
+  lastClientActivity = millis();
+
+  String page = String(DEBUG_PAGE_HTML);
+  page.replace("%THRESHOLD%", String(PULSE_THRESHOLD));
+  page.replace("%WINDOW%", String(PULSE_CONFIRM_WINDOW_MS));
+
+  server.send(200, "text/html", page);
+}
+
+void handleDebugStream() {
+  lastClientActivity = millis();
+
+  int gpioState = digitalRead(PIN_LIGHT_SENSOR);
+  String json = "{\"gpio\":" + String(gpioState) + "}";
+  server.send(200, "application/json", json);
 }
 
 // ===========================================================================
