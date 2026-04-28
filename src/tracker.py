@@ -232,69 +232,70 @@ class TrainTracker:
     def handle_rtt_update(self, headcode: str, station: str, platform: str,
                           status: str, origin_codes: list = None, dest_codes: list = None):
         """Process an RTT station status update. Updates sub_position for station berths."""
-        train = self.trains.get(headcode)
-        if not train:
-            return  # RTT only enriches, doesn't create
+        with self._lock:
+            train = self.trains.get(headcode)
+            if not train:
+                return  # RTT only enriches, doesn't create
 
-        # Don't update trains that are already cleared or lost
-        if train.phase in (TrainPhase.CLEARED, TrainPhase.LOST):
-            return
-
-        # Don't update stale trains (avoid matching wrong headcode reuse)
-        if train.age_secs > 600:
-            return
-
-        now = datetime.now(timezone.utc)
-
-        if status == "AT_PLATFORM":
-            # For eastbound (up) trains at Goring: AT_PLATFORM means past the crossing
-            # (crossing is BEFORE Goring station for up direction)
-            if ("goring" in station.lower() and train.direction == Direction.UP
-                    and platform in ("1", None)):
-                if train.phase != TrainPhase.CLEARED:
-                    logger.info(f"🚂 {headcode} (up): "
-                                f"{train.phase.value} → cleared (RTT AT_PLATFORM {station} P{platform})")
-                    train.phase = TrainPhase.CLEARED
-                    train.confidence = 0.95
-                    train.station = station
-                    train.sub_position = None
-                    train.last_update = now
+            # Don't update trains that are already cleared or lost
+            if train.phase in (TrainPhase.CLEARED, TrainPhase.LOST):
                 return
 
-            # For westbound (down) trains at Angmering: AT_PLATFORM means past the crossing
-            if (station == "Angmering" and train.direction == Direction.DOWN
-                    and platform in ("2", None)):
-                if train.phase != TrainPhase.CLEARED:
-                    logger.info(f"🚂 {headcode} (down): "
-                                f"{train.phase.value} → cleared (RTT AT_PLATFORM {station} P{platform})")
-                    train.phase = TrainPhase.CLEARED
-                    train.confidence = 0.95
-                    train.station = station
-                    train.sub_position = None
-                    train.last_update = now
+            # Don't update stale trains (avoid matching wrong headcode reuse)
+            if train.age_secs > 600:
                 return
 
-            # Set at_platform sub-position if train is in a station berth
-            if train.last_berth in self.station_berths:
-                logger.info(f"🚂 {headcode}: sub_position entry → at_platform "
-                            f"(RTT {status} {station} P{platform})")
-                train.sub_position = "at_platform"
-                train.phase = TrainPhase.AT_STATION
-                train.confidence = 0.8
-                train.station = station
-                train.last_update = now
-            else:
-                # Train at a station but not in a known station berth — just mark phase
-                logger.info(f"🚂 {headcode}: {train.phase.value} → at_station "
-                            f"(RTT {status} {station} P{platform})")
-                train.phase = TrainPhase.AT_STATION
-                train.confidence = 0.8
-                train.station = station
-                train.last_update = now
+            now = datetime.now(timezone.utc)
 
-        elif status in ("DEPARTING", "DEPART_READY", "DEPART_PREPARING"):
-            logger.debug(f"🚂 {headcode}: RTT {status} at {station} P{platform}")
-            train.last_update = now
+            if status == "AT_PLATFORM":
+                # For eastbound (up) trains at Goring: AT_PLATFORM means past the crossing
+                # (crossing is BEFORE Goring station for up direction)
+                if ("goring" in station.lower() and train.direction == Direction.UP
+                        and platform in ("1", None)):
+                    if train.phase != TrainPhase.CLEARED:
+                        logger.info(f"🚂 {headcode} (up): "
+                                    f"{train.phase.value} → cleared (RTT AT_PLATFORM {station} P{platform})")
+                        train.phase = TrainPhase.CLEARED
+                        train.confidence = 0.95
+                        train.station = station
+                        train.sub_position = None
+                        train.last_update = now
+                    return
+
+                # For westbound (down) trains at Angmering: AT_PLATFORM means past the crossing
+                if (station == "Angmering" and train.direction == Direction.DOWN
+                        and platform in ("2", None)):
+                    if train.phase != TrainPhase.CLEARED:
+                        logger.info(f"🚂 {headcode} (down): "
+                                    f"{train.phase.value} → cleared (RTT AT_PLATFORM {station} P{platform})")
+                        train.phase = TrainPhase.CLEARED
+                        train.confidence = 0.95
+                        train.station = station
+                        train.sub_position = None
+                        train.last_update = now
+                    return
+
+                # Set at_platform sub-position if train is in a station berth
+                if train.last_berth in self.station_berths:
+                    logger.info(f"🚂 {headcode}: sub_position entry → at_platform "
+                                f"(RTT {status} {station} P{platform})")
+                    train.sub_position = "at_platform"
+                    train.phase = TrainPhase.AT_STATION
+                    train.confidence = 0.8
+                    train.station = station
+                    train.last_update = now
+                else:
+                    # Train at a station but not in a known station berth — just mark phase
+                    logger.info(f"🚂 {headcode}: {train.phase.value} → at_station "
+                                f"(RTT {status} {station} P{platform})")
+                    train.phase = TrainPhase.AT_STATION
+                    train.confidence = 0.8
+                    train.station = station
+                    train.last_update = now
+
+            elif status in ("DEPARTING", "DEPART_READY", "DEPART_PREPARING"):
+                logger.debug(f"🚂 {headcode}: RTT {status} at {station} P{platform}")
+                train.last_update = now
 
     def _classify_berth(self, berth: str, preferred_direction: Optional[Direction] = None) -> tuple[Optional[TrainPhase], Optional[Direction]]:
         """Determine what phase and direction a berth represents.

@@ -96,6 +96,15 @@ class NRODListener(stomp.ConnectionListener):
                         if headcode and to_berth:
                             self.tracker.handle_td_step("", to_berth, headcode, timestamp)
 
+                    elif msg_type == "CB_MSG":
+                        # Berth cancel: train description removed from berth
+                        from_berth = data.get("from", "")
+                        headcode = data.get("descr", "")
+                        timestamp = self._parse_td_time(data.get("time", ""))
+
+                        if headcode and from_berth:
+                            self.tracker.handle_td_cancel(from_berth, headcode, timestamp)
+
     def _handle_trust(self, messages: list):
         """Process TRUST train movement messages."""
         for msg in messages:
