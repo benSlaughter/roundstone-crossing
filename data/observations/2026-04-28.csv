@@ -1,12 +1,12 @@
 timestamp,event,precision,notes
-2026-04-28T13:07:00,open,minute,arrived at crossing - gate open
-2026-04-28T13:09:00,closing,minute,observed gate closing
-2026-04-28T13:10:00,train_east,minute,train crossing eastbound
-2026-04-28T13:11:00,train_west,minute,train crossing westbound
-2026-04-28T13:12:00,opening,minute,observed gate opening
+2026-04-28T13:07,open,minute,arrived at crossing - gate open
+2026-04-28T13:09,closing,minute,observed gate closing
+2026-04-28T13:10,train_east,minute,train crossing eastbound
+2026-04-28T13:11,train_west,minute,train crossing westbound
+2026-04-28T13:12,opening,minute,observed gate opening
 2026-04-28T13:13:05,closing,second,observed gate closing
-2026-04-28T13:14:00,train_east,minute,train crossing eastbound
-2026-04-28T13:14:00,opening,minute,observed gate opening
+2026-04-28T13:14,train_east,minute,train crossing eastbound
+2026-04-28T13:14,opening,minute,observed gate opening
 2026-04-28T13:18:33,closing,second,observed gate closing
 2026-04-28T13:20:45,train_east,second,train crossing eastbound
 2026-04-28T13:21:52,train_west,second,train crossing westbound
