@@ -9,6 +9,7 @@ import os
 import sys
 import threading
 from datetime import datetime, timezone
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from time import sleep
 
@@ -87,8 +88,8 @@ def run_predictor(config: dict, with_api: bool = False):
                 eta = status.seconds_until_change()
                 eta_str = f" (change in {eta:.0f}s)" if eta else ""
                 train_str = f" [{len(active)} train{'s' if len(active) != 1 else ''}]" if active else ""
-                print(
-                    f"  🚦 {status.state.value.upper()}"
+                logger.info(
+                    f"🚦 {status.state.value.upper()}"
                     f" ({status.confidence:.0%}){train_str}{eta_str}"
                 )
 
@@ -103,6 +104,7 @@ def run_predictor(config: dict, with_api: bool = False):
 
     except KeyboardInterrupt:
         print("\n👋 Shutting down...")
+        logger.info("👋 Shutting down...")
     finally:
         rtt.stop()
         feed.stop()
@@ -137,11 +139,34 @@ def main():
                 key, _, value = line.partition("=")
                 os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
 
-    # Logging
-    logging.basicConfig(
-        level=logging.DEBUG if args.debug else logging.INFO,
-        format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
+    # Logging — console + rotating file
+    log_level = logging.DEBUG if args.debug else logging.INFO
+    log_format = "%(asctime)s [%(name)s] %(levelname)s: %(message)s"
+    formatter = logging.Formatter(log_format)
+
+    # Console handler
+    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler.setFormatter(formatter)
+
+    # File handler — rotates at 5MB, keeps 5 backups
+    log_dir = Path(__file__).parent.parent / "logs"
+    log_dir.mkdir(exist_ok=True)
+    file_handler = RotatingFileHandler(
+        log_dir / "crossing.log", maxBytes=5 * 1024 * 1024, backupCount=5,
     )
+    file_handler.setFormatter(formatter)
+
+    root_logger = logging.getLogger()
+    root_logger.setLevel(log_level)
+    root_logger.addHandler(console_handler)
+    root_logger.addHandler(file_handler)
+
+    # Redirect uvicorn/starlette access logs to file too
+    for uvi_name in ("uvicorn", "uvicorn.access", "uvicorn.error"):
+        uvi_logger = logging.getLogger(uvi_name)
+        uvi_logger.handlers.clear()
+        uvi_logger.addHandler(console_handler)
+        uvi_logger.addHandler(file_handler)
     # Quiet noisy libs
     for noisy in ("stomp.py", "urllib3"):
         logging.getLogger(noisy).setLevel(logging.WARNING)
