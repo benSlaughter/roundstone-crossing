@@ -52,9 +52,8 @@ class CrossingInferrer:
         # Classify based on the "most advanced" train phase
         phases = [t.phase for t in active_trains]
 
-        # If barriers are currently inferred closed, they stay closed until we
-        # predict opening — a second train in STRIKE_IN doesn't mean the
-        # barriers lifted and are closing again.
+        # Once barriers are closed, they stay closed until ALL trains clear.
+        # The only valid exit from CLOSED is → OPENING_PREDICTED → OPEN.
         was_closed = old_state in (CrossingState.CLOSED_INFERRED,
                                    CrossingState.OPENING_PREDICTED)
 
@@ -64,10 +63,8 @@ class CrossingInferrer:
             self.status.predicted_change = self._predict_opening(active_trains)
             self.status.predicted_next_state = CrossingState.OPENING_PREDICTED
 
-        elif was_closed and (TrainPhase.STRIKE_IN in phases
-                             or TrainPhase.AT_STATION in phases):
-            # Barriers were already down and another train is imminent —
-            # signaller keeps barriers lowered, stay CLOSED
+        elif was_closed:
+            # Barriers already down — keep them down while any trains remain
             self._transition(CrossingState.CLOSED_INFERRED, confidence=0.85)
             self.status.predicted_change = self._predict_opening(active_trains)
             self.status.predicted_next_state = CrossingState.OPENING_PREDICTED

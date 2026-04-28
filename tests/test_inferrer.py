@@ -301,3 +301,18 @@ class TestBarriersStayClosedForConsecutiveTrains:
         )
         status = inferrer.update([strike_in], FEED_RECENT)
         assert status.state == CrossingState.CLOSING_PREDICTED
+
+    def test_closed_stays_closed_when_approaching_within_pre_closure(self, inferrer, make_train):
+        """After AT_CROSSING, an APPROACHING train within pre_closure keeps barriers down."""
+        at_crossing = make_train(headcode="1A00", phase=TrainPhase.AT_CROSSING)
+        inferrer.update([at_crossing], FEED_RECENT)
+        assert inferrer.status.state == CrossingState.CLOSED_INFERRED
+
+        approaching = make_train(
+            headcode="2B00",
+            phase=TrainPhase.APPROACHING,
+            predicted_at_crossing=NOW + timedelta(seconds=60),
+        )
+        status = inferrer.update([approaching], FEED_RECENT)
+        # Should stay CLOSED — barriers wouldn't open and reclose
+        assert status.state == CrossingState.CLOSED_INFERRED
