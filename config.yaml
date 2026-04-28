@@ -65,6 +65,9 @@ timing:
   # How long after the train clears does it take for barriers to raise?
   post_clearance_secs: 15  # Signaller verifies clear via CCTV, then raises
 
+  # How long it takes a train to physically clear the crossing zone
+  crossing_clearance_secs: 30
+
   # Minimum warning time per regulations (GK/RT0192)
   min_warning_secs: 27
 

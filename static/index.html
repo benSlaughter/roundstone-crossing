@@ -833,7 +833,9 @@
         const eta = document.getElementById('status-eta');
         if (data.seconds_until_change != null && data.seconds_until_change > 0) {
           const nextLabel = STATE_CONFIG[data.predicted_next_state]?.label || '';
-          eta.textContent = `${nextLabel} in ~${formatDuration(data.seconds_until_change)}`;
+          const trainCount = (data.active_trains || []).length;
+          const multi = trainCount > 1 ? ` · ${trainCount} trains` : '';
+          eta.textContent = `${nextLabel} in ~${formatDuration(data.seconds_until_change)}${multi}`;
         } else {
           eta.textContent = '';
         }

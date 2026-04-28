@@ -28,6 +28,7 @@ def test_config():
         "timing": {
             "pre_closure_secs": 120,
             "post_clearance_secs": 15,
+            "crossing_clearance_secs": 30,
             "min_warning_secs": 27,
             "stale_threshold_secs": 300,
         },

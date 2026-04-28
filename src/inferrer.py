@@ -17,6 +17,7 @@ class CrossingInferrer:
         self.config = config
         self.status = CrossingStatus()
         self._timing = config.get("timing", {})
+        self._last_clear_time: datetime | None = None
 
     def update(self, active_trains: list[TrackedTrain], last_feed_time: datetime | None):
         """Re-derive crossing state from the current set of active trains."""
@@ -32,8 +33,21 @@ class CrossingInferrer:
             return self.status
 
         if not active_trains:
-            self._transition(CrossingState.OPEN, confidence=0.8)
+            # Check if we just cleared — show OPENING_PREDICTED briefly
+            post_clearance = self._timing.get("post_clearance_secs", 15)
+            if (self._last_clear_time
+                    and (now - self._last_clear_time).total_seconds() < post_clearance):
+                self._transition(CrossingState.OPENING_PREDICTED, confidence=0.8)
+                open_at = self._last_clear_time + timedelta(seconds=post_clearance)
+                self.status.predicted_change = open_at
+                self.status.predicted_next_state = CrossingState.OPEN
+            else:
+                self._transition(CrossingState.OPEN, confidence=0.8)
+                self._last_clear_time = None
             return self.status
+
+        # Track when trains were last present (for OPENING_PREDICTED after they clear)
+        self._last_clear_time = now
 
         # Classify based on the "most advanced" train phase
         phases = [t.phase for t in active_trains]
@@ -100,9 +114,65 @@ class CrossingInferrer:
         return min(candidates, key=lambda t: t.predicted_at_crossing)
 
     def _predict_opening(self, trains: list[TrackedTrain]) -> datetime | None:
-        """Predict when barriers will open — after the last train clears."""
-        post_clearance = self._timing.get("post_clearance_secs", 15)
-        # Assume train takes ~30s to clear the crossing from "at crossing"
-        crossing_time = 30
+        """Predict when barriers will open based on closure window merging.
+
+        Builds a closure window per train and merges overlapping windows.
+        The predicted opening is the end of the current merged closure block.
+        Trains without a credible predicted_at_crossing are estimated by phase.
+        """
         now = datetime.now(timezone.utc)
-        return now + timedelta(seconds=crossing_time + post_clearance)
+        crossing_clear = self._timing.get("crossing_clearance_secs", 30)
+        post_clearance = self._timing.get("post_clearance_secs", 15)
+        pre_closure = self._timing.get("pre_closure_secs", 120)
+
+        # Build closure windows: (start, end) for each non-cleared train
+        windows: list[tuple[datetime, datetime]] = []
+        for t in trains:
+            if t.phase in (TrainPhase.CLEARED, TrainPhase.LOST):
+                continue
+            eta = self._estimate_clear_time(t, now, crossing_clear)
+            if eta is None:
+                continue
+            # Window starts when barriers would lower for this train
+            window_start = max(eta - timedelta(seconds=crossing_clear + pre_closure), now)
+            window_end = max(eta + timedelta(seconds=post_clearance), now)
+            windows.append((window_start, window_end))
+
+        if not windows:
+            return now + timedelta(seconds=crossing_clear + post_clearance)
+
+        # Merge overlapping windows, find the one containing 'now'
+        windows.sort()
+        merged: list[tuple[datetime, datetime]] = [windows[0]]
+        for start, end in windows[1:]:
+            if start <= merged[-1][1]:
+                merged[-1] = (merged[-1][0], max(merged[-1][1], end))
+            else:
+                merged.append((start, end))
+
+        # Return the end of the current (or first) merged block
+        for start, end in merged:
+            if start <= now <= end:
+                return end
+        return merged[0][1]
+
+    def _estimate_clear_time(self, train: TrackedTrain, now: datetime,
+                             crossing_clear_secs: float) -> datetime | None:
+        """Estimate when a train will have cleared the crossing.
+
+        Uses predicted_at_crossing when available; falls back to phase-based
+        heuristics for AT_CROSSING trains only (other phases without an ETA
+        are excluded to avoid false certainty).
+        """
+        if train.phase == TrainPhase.AT_CROSSING:
+            # Train is physically at the crossing — use crossing clearance time
+            base = train.predicted_at_crossing or now
+            return max(base, now) + timedelta(seconds=crossing_clear_secs)
+
+        if train.predicted_at_crossing:
+            # Have a credible ETA — clearing = arrival + crossing time
+            return max(train.predicted_at_crossing, now) + timedelta(seconds=crossing_clear_secs)
+
+        # No predicted_at_crossing and not AT_CROSSING — exclude from prediction
+        # to avoid inventing unreliable ETAs
+        return None
