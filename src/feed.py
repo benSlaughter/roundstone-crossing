@@ -55,11 +55,11 @@ class NRODListener(stomp.ConnectionListener):
 
     def on_connected(self, frame):
         self.connected = True
-        logger.info("✅ Connected to NROD")
+        logger.info("Connected to NROD")
 
     def on_disconnected(self):
         self.connected = False
-        logger.warning("❌ Disconnected from NROD")
+        logger.warning("Disconnected from NROD")
         if self.on_disconnect_callback:
             self.on_disconnect_callback()
 
@@ -182,7 +182,7 @@ class NRODFeed:
         password = os.environ.get("NROD_PASSWORD", "")
 
         if not username or not password:
-            logger.error("❌ NROD_USERNAME and NROD_PASSWORD must be set")
+            logger.error("NROD_USERNAME and NROD_PASSWORD must be set")
             return False
 
         # Disconnect existing connection cleanly before reconnecting
@@ -206,7 +206,7 @@ class NRODFeed:
                 wait=True,
             )
         except Exception as e:
-            logger.error(f"❌ Failed to connect to NROD: {e}")
+            logger.error(f"Failed to connect to NROD: {e}")
             return False
 
         # Subscribe to TD feed (train describer — berth stepping)
@@ -215,7 +215,7 @@ class NRODFeed:
             id="td-sub",
             ack="auto",
         )
-        logger.info("📡 Subscribed to TD feed")
+        logger.info("Subscribed to TD feed")
 
         # Subscribe to TRUST feed (train movements)
         self.connection.subscribe(
@@ -223,7 +223,7 @@ class NRODFeed:
             id="trust-sub",
             ack="auto",
         )
-        logger.info("📡 Subscribed to TRUST feed")
+        logger.info("Subscribed to TRUST feed")
 
         self._running = True
         return True
@@ -237,7 +237,7 @@ class NRODFeed:
             attempt = 0
             while self._running:
                 delay = self._reconnect_backoffs[min(attempt, len(self._reconnect_backoffs) - 1)]
-                logger.info(f"🔄 Reconnecting to NROD in {delay}s (attempt {attempt + 1})")
+                logger.info(f"Reconnecting to NROD in {delay}s (attempt {attempt + 1})")
                 sleep(delay)
 
                 if not self._running:
@@ -245,10 +245,10 @@ class NRODFeed:
 
                 try:
                     if self.start():
-                        logger.info("✅ Reconnected to NROD successfully")
+                        logger.info("Reconnected to NROD successfully")
                         return
                 except Exception as e:
-                    logger.error(f"❌ Reconnect attempt {attempt + 1} failed: {e}")
+                    logger.error(f"Reconnect attempt {attempt + 1} failed: {e}")
 
                 attempt += 1
 
@@ -260,7 +260,7 @@ class NRODFeed:
         self._running = False
         if self.connection and self.connection.is_connected():
             self.connection.disconnect()
-            logger.info("📡 Disconnected from NROD")
+            logger.info("Disconnected from NROD")
 
     @property
     def is_connected(self) -> bool:

@@ -65,12 +65,12 @@ def run_predictor(config: dict, with_api: bool = False):
         api_thread.start()
 
     # Connect to NROD
-    logger.info("🚂 Roundstone Crossing Predictor starting...")
+    logger.info("Roundstone Crossing Predictor starting...")
     if not feed.start():
         logger.error("Failed to connect to NROD. Check credentials in .env")
         sys.exit(1)
 
-    logger.info("🟢 Running — press Ctrl+C to stop")
+    logger.info("Running — press Ctrl+C to stop")
     prev_state = None
 
     try:
@@ -89,7 +89,7 @@ def run_predictor(config: dict, with_api: bool = False):
                 eta_str = f" (change in {eta:.0f}s)" if eta else ""
                 train_str = f" [{len(active)} train{'s' if len(active) != 1 else ''}]" if active else ""
                 logger.info(
-                    f"🚦 {status.state.value.upper()}"
+                    f"State: {status.state.value.upper()}"
                     f" ({status.confidence:.0%}){train_str}{eta_str}"
                 )
 
@@ -103,12 +103,12 @@ def run_predictor(config: dict, with_api: bool = False):
             sleep(2)  # Check every 2 seconds
 
     except KeyboardInterrupt:
-        print("\n👋 Shutting down...")
-        logger.info("👋 Shutting down...")
+        print("\nShutting down...")
+        logger.info("Shutting down...")
     finally:
         rtt.stop()
         feed.stop()
-        logger.info("🔴 Stopped")
+        logger.info("Stopped")
 
 
 def _start_api(config: dict, tracker, inferrer, history, rtt_client=None):
@@ -120,7 +120,7 @@ def _start_api(config: dict, tracker, inferrer, history, rtt_client=None):
     api_config = config.get("api", {})
     host = api_config.get("host", "0.0.0.0")
     port = api_config.get("port", 8590)
-    logger.info(f"🌐 API on {host}:{port}")
+    logger.info(f"API on {host}:{port}")
     uvicorn.run(app, host=host, port=port, log_level="warning")
 
 

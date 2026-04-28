@@ -55,7 +55,7 @@ class TrainTracker:
             self.all_relevant_berths |= self.clear_berths[d]
 
         if not self.all_relevant_berths:
-            logger.warning("⚠️  No berth zones configured — TD tracking will not work until berths are mapped")
+            logger.warning("No berth zones configured — TD tracking will not work until berths are mapped")
 
     def _load_station_berths(self):
         """Load station berth config — berths that straddle station platforms."""
@@ -81,7 +81,7 @@ class TrainTracker:
             if not train:
                 train = TrackedTrain(headcode=headcode, last_berth=to_berth, last_berth_time=now)
                 self.trains[headcode] = train
-                logger.info(f"🚂 New train spotted: {headcode} at berth {to_berth}")
+                logger.info(f"New train spotted: {headcode} at berth {to_berth}")
 
             train.last_berth = to_berth
             train.last_berth_time = now
@@ -121,7 +121,7 @@ class TrainTracker:
                 train.direction = direction
             if new_phase:
                 if new_phase != train.phase:
-                    logger.info(f"🚂 {headcode} ({train.direction.value if train.direction else '?'}): "
+                    logger.info(f"{headcode} ({train.direction.value if train.direction else '?'}): "
                                 f"{train.phase.value} → {new_phase.value} (berth {to_berth})")
                 train.phase = new_phase
 
@@ -160,7 +160,7 @@ class TrainTracker:
 
             # Only act if the cancel is for the berth the train is currently in
             if train.last_berth == berth:
-                logger.info(f"🚂 {headcode}: berth cancel at {berth} → lost")
+                logger.info(f"{headcode}: berth cancel at {berth} → lost")
                 train.phase = TrainPhase.LOST
                 train.last_update = timestamp or datetime.now(timezone.utc)
 
@@ -212,7 +212,7 @@ class TrainTracker:
             if action == "clear":
                 # Westbound arrival at Angmering P2 = past the crossing
                 if train.phase != TrainPhase.CLEARED:
-                    logger.info(f"🚂 {hc} ({direction.value}): "
+                    logger.info(f"{hc} ({direction.value}): "
                                 f"{train.phase.value} → cleared (TRUST arrival at {station})")
                     train.phase = TrainPhase.CLEARED
                     train.confidence = 0.95
@@ -258,7 +258,7 @@ class TrainTracker:
                 if ("goring" in station.lower() and train.direction == Direction.UP
                         and platform in ("1", None)):
                     if train.phase != TrainPhase.CLEARED:
-                        logger.info(f"🚂 {headcode} (up): "
+                        logger.info(f"{headcode} (up): "
                                     f"{train.phase.value} → cleared (RTT AT_PLATFORM {station} P{platform})")
                         train.phase = TrainPhase.CLEARED
                         train.confidence = 0.95
@@ -271,7 +271,7 @@ class TrainTracker:
                 if (station == "Angmering" and train.direction == Direction.DOWN
                         and platform in ("2", None)):
                     if train.phase != TrainPhase.CLEARED:
-                        logger.info(f"🚂 {headcode} (down): "
+                        logger.info(f"{headcode} (down): "
                                     f"{train.phase.value} → cleared (RTT AT_PLATFORM {station} P{platform})")
                         train.phase = TrainPhase.CLEARED
                         train.confidence = 0.95
@@ -282,7 +282,7 @@ class TrainTracker:
 
                 # Set at_platform sub-position if train is in a station berth
                 if train.last_berth in self.station_berths:
-                    logger.info(f"🚂 {headcode}: sub_position entry → at_platform "
+                    logger.info(f"{headcode}: sub_position entry → at_platform "
                                 f"(RTT {status} {station} P{platform})")
                     train.sub_position = "at_platform"
                     train.phase = TrainPhase.AT_STATION
@@ -291,7 +291,7 @@ class TrainTracker:
                     train.last_update = now
                 else:
                     # Train at a station but not in a known station berth — just mark phase
-                    logger.info(f"🚂 {headcode}: {train.phase.value} → at_station "
+                    logger.info(f"{headcode}: {train.phase.value} → at_station "
                                 f"(RTT {status} {station} P{platform})")
                     train.phase = TrainPhase.AT_STATION
                     train.confidence = 0.8
@@ -299,7 +299,7 @@ class TrainTracker:
                     train.last_update = now
 
             elif status in ("DEPARTING", "DEPART_READY", "DEPART_PREPARING"):
-                logger.debug(f"🚂 {headcode}: RTT {status} at {station} P{platform}")
+                logger.debug(f"{headcode}: RTT {status} at {station} P{platform}")
                 train.last_update = now
 
     def _classify_berth(self, berth: str, preferred_direction: Optional[Direction] = None) -> tuple[Optional[TrainPhase], Optional[Direction]]:
@@ -348,7 +348,7 @@ class TrainTracker:
         """Mark stale trains as LOST, remove very old ones."""
         for hc, train in list(self.trains.items()):
             if train.is_stale and train.phase != TrainPhase.LOST:
-                logger.info(f"👻 Train {hc} marked as LOST (no update for {train.age_secs:.0f}s)")
+                logger.info(f"Train {hc} marked as LOST (no update for {train.age_secs:.0f}s)")
                 train.phase = TrainPhase.LOST
             # Remove trains that cleared or were lost more than 3 minutes ago
             if train.phase in (TrainPhase.CLEARED, TrainPhase.LOST) and train.age_secs > 180:

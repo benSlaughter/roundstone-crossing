@@ -89,7 +89,7 @@ class HistoryLogger:
 
         db.commit()
         db.close()
-        logger.info(f"📊 History database: {self.db_path}")
+        logger.info(f"History database: {self.db_path}")
 
     def log_state_change(self, status: CrossingStatus):
         """Log a crossing state transition."""
@@ -112,7 +112,7 @@ class HistoryLogger:
             )
             self._current_interval_id = cursor.lastrowid
             self._current_state = status.state
-            logger.debug(f"📊 Logged state: {status.state.value} (interval #{self._current_interval_id})")
+            logger.debug(f"Logged state: {status.state.value} (interval #{self._current_interval_id})")
 
         db.commit()
         db.close()
@@ -144,7 +144,7 @@ class HistoryLogger:
         )
         db.commit()
         db.close()
-        logger.debug(f"📊 Logged passage: {train.headcode} ({train.direction})")
+        logger.debug(f"Logged passage: {train.headcode} ({train.direction})")
 
     def log_train_event(self, headcode: str, event: str, from_berth: str = None,
                         to_berth: str = None, phase: str = None, direction: str = None):

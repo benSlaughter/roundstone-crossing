@@ -42,7 +42,7 @@ class RTTClient:
         self._has_active_trains: Callable = lambda: False  # gate for polling
 
         if not self._refresh_token:
-            logger.warning("⚠️  RTT_TOKEN not set — RTT integration disabled")
+            logger.warning("RTT_TOKEN not set — RTT integration disabled")
 
     def set_callback(self, callback: Callable):
         """Set callback for station updates: callback(headcode, station, platform, status, direction_hint)"""
@@ -59,7 +59,7 @@ class RTTClient:
         self._running = True
         self._thread = threading.Thread(target=self._poll_loop, daemon=True, name="rtt-poller")
         self._thread.start()
-        logger.info(f"📡 RTT polling started for {', '.join(self.stations)} (every {self.poll_interval}s)")
+        logger.info(f"RTT polling started for {', '.join(self.stations)} (every {self.poll_interval}s)")
 
     def stop(self):
         """Stop polling."""
@@ -324,4 +324,4 @@ class RTTClient:
         """Handle 429 rate limit response."""
         retry_after = int(resp.headers.get("Retry-After", 60))
         self._retry_after = datetime.now(timezone.utc) + timedelta(seconds=retry_after)
-        logger.warning(f"⚠️  RTT rate limited — backing off {retry_after}s")
+        logger.warning(f"RTT rate limited — backing off {retry_after}s")

@@ -91,7 +91,7 @@ class CrossingInferrer:
             self._transition(CrossingState.OPEN, confidence=0.7)
 
         if self.status.state != old_state:
-            logger.info(f"🚦 Crossing: {old_state.value} → {self.status.state.value} "
+            logger.info(f"Crossing: {old_state.value} -> {self.status.state.value} "
                         f"(confidence={self.status.confidence:.1%}, "
                         f"trains={len(active_trains)})")
 
