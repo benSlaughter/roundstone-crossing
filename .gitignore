@@ -5,4 +5,5 @@ __pycache__/
 *.db
 .DS_Store
 data/
+!data/observations/
 logs/*.log
