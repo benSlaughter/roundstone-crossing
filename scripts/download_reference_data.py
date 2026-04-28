@@ -92,7 +92,7 @@ def download_feed(name: str, feed: dict) -> Path:
 
 
 def main():
-    print(f"NROD user: {NROD_USERNAME}")
+    print(f"NROD user: {NROD_USERNAME[:3]}***")
     print(f"Output dir: {DATA_DIR}\n")
 
     for name, feed in FEEDS.items():

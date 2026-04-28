@@ -2,7 +2,7 @@
 """
 Find TD berths near Roundstone Level Crossing from SMART data.
 
-Parses the downloaded SMART dataset to find berths in the "ES" TD area
+Parses the downloaded SMART dataset to find berths in the "LA" TD area
 that are geographically near the crossing (between Angmering and Goring-by-Sea).
 
 Usage:
@@ -20,7 +20,7 @@ SMART_PATH = DATA_DIR / "smart.json"
 CORPUS_PATH = DATA_DIR / "corpus.json"
 
 # TD area for Sussex Coastway
-TARGET_TD_AREA = "ES"
+TARGET_TD_AREA = "LA"
 
 # STANOXes for stations either side of the crossing
 STANOX_ANGMERING = "87998"
@@ -82,9 +82,9 @@ def load_corpus():
         return None
 
 
-def find_es_berths(smart_data):
-    """Find all berths in the ES TD area."""
-    es_berths = []
+def find_area_berths(smart_data):
+    """Find all berths in the target TD area."""
+    area_berths = []
     for entry in smart_data:
         td_area = entry.get("TD", "") or entry.get("td", "") or entry.get("FROMBERTH", "")[:2] if len(entry.get("FROMBERTH", "")) >= 2 else ""
         # Check various field name conventions
@@ -97,14 +97,14 @@ def find_es_berths(smart_data):
             or ""
         )
         if area.strip().upper() == TARGET_TD_AREA:
-            es_berths.append(entry)
-    return es_berths
+            area_berths.append(entry)
+    return area_berths
 
 
-def find_relevant_berths(es_berths):
-    """Filter ES berths to those likely near the crossing (between Angmering and Goring)."""
+def find_relevant_berths(area_berths):
+    """Filter area berths to those likely near the crossing (between Angmering and Goring)."""
     relevant = []
-    for entry in es_berths:
+    for entry in area_berths:
         # Check STANOX associations
         stanox = str(entry.get("STANOX", "") or entry.get("stanox", "") or "").strip()
         steptype = entry.get("STEPTYPE", "") or entry.get("steptype", "") or ""
@@ -144,12 +144,12 @@ def main():
     if smart_data:
         print(f"\n  Sample entry keys: {list(smart_data[0].keys())}")
 
-    # Find ES area berths
-    es_berths = find_es_berths(smart_data)
-    print(f"\n  ES area berths: {len(es_berths)}")
+    # Find target area berths
+    area_berths = find_area_berths(smart_data)
+    print(f"\n  {TARGET_TD_AREA} area berths: {len(area_berths)}")
 
-    if not es_berths:
-        print("\n  No ES-area berths found. Dumping all unique TD areas:")
+    if not area_berths:
+        print(f"\n  No {TARGET_TD_AREA}-area berths found. Dumping all unique TD areas:")
         areas = set()
         for entry in smart_data:
             area = (
@@ -167,23 +167,23 @@ def main():
         return
 
     # Find berths near the crossing
-    relevant = find_relevant_berths(es_berths)
+    relevant = find_relevant_berths(area_berths)
 
     print(f"\n{'=' * 70}")
     print(f"Berths associated with Angmering (STANOX {STANOX_ANGMERING}) or Goring (STANOX {STANOX_GORING}):")
     print(f"{'=' * 70}")
 
     if not relevant:
-        print("  No berths matched by STANOX. Listing all ES berths instead:\n")
-        # Fall back to showing all ES berths with their STANOXes
+        print(f"  No berths matched by STANOX. Listing all {TARGET_TD_AREA} berths instead:\n")
+        # Fall back to showing all area berths with their STANOXes
         seen_stanox = set()
-        for entry in es_berths:
+        for entry in area_berths:
             stanox = str(entry.get("STANOX", "") or "").strip()
             if stanox:
                 seen_stanox.add(stanox)
-        print(f"  Unique STANOXes in ES area: {sorted(seen_stanox)}")
-        print(f"\n  Listing first 30 ES berth steps:")
-        for i, entry in enumerate(es_berths[:30]):
+        print(f"  Unique STANOXes in {TARGET_TD_AREA} area: {sorted(seen_stanox)}")
+        print(f"\n  Listing first 30 {TARGET_TD_AREA} berth steps:")
+        for i, entry in enumerate(area_berths[:30]):
             from_b = entry.get("FROMBERTH", "") or entry.get("FROM_BERTH", "")
             to_b = entry.get("TOBERTH", "") or entry.get("TO_BERTH", "")
             stanox = entry.get("STANOX", "")
@@ -199,14 +199,14 @@ def main():
 
     # Also show berths NOT matched but close in number range
     all_berth_ids = set()
-    for entry in es_berths:
+    for entry in area_berths:
         for key in ["FROMBERTH", "TOBERTH", "FROM_BERTH", "TO_BERTH", "fromberth", "toberth"]:
             val = str(entry.get(key, "")).strip()
             if val:
                 all_berth_ids.add(val)
 
     print(f"\n{'=' * 70}")
-    print(f"All unique berth IDs in ES area ({len(all_berth_ids)} total):")
+    print(f"All unique berth IDs in {TARGET_TD_AREA} area ({len(all_berth_ids)} total):")
     print(f"{'=' * 70}")
     for berth in sorted(all_berth_ids):
         print(f"  {berth}")

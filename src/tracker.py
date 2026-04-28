@@ -150,18 +150,19 @@ class TrainTracker:
 
     def handle_td_cancel(self, berth: str, headcode: str, timestamp: datetime):
         """Handle a TD berth cancel (CB_MSG). Removes train if it matches the cancelled berth."""
-        if berth not in self.all_relevant_berths:
-            return
+        with self._lock:
+            if berth not in self.all_relevant_berths:
+                return
 
-        train = self.trains.get(headcode)
-        if not train:
-            return
+            train = self.trains.get(headcode)
+            if not train:
+                return
 
-        # Only act if the cancel is for the berth the train is currently in
-        if train.last_berth == berth:
-            logger.info(f"🚂 {headcode}: berth cancel at {berth} → lost")
-            train.phase = TrainPhase.LOST
-            train.last_update = timestamp or datetime.now(timezone.utc)
+            # Only act if the cancel is for the berth the train is currently in
+            if train.last_berth == berth:
+                logger.info(f"🚂 {headcode}: berth cancel at {berth} → lost")
+                train.phase = TrainPhase.LOST
+                train.last_update = timestamp or datetime.now(timezone.utc)
 
     def handle_trust_movement(self, train_id: str, stanox: str, event_type: str,
                                actual_time: datetime, headcode: Optional[str] = None):

@@ -50,7 +50,7 @@ class HistoryLogger:
                 first_seen TEXT,
                 predicted_close TEXT,
                 predicted_open TEXT,
-                observed_at_crossing TEXT,
+                observed_at_crossing TEXT,    -- actually stores predicted_at_crossing time
                 observed_clear TEXT,
                 confidence REAL,
                 created_at TEXT NOT NULL
@@ -118,7 +118,12 @@ class HistoryLogger:
         db.close()
 
     def log_train_passage(self, train: TrackedTrain):
-        """Log a complete train passage (when train clears the crossing)."""
+        """Log a complete train passage (when train clears the crossing).
+
+        Note: 'observed_at_crossing' column stores the predicted crossing time
+        (from train.predicted_at_crossing), not an actual observed timestamp.
+        A future schema migration could rename this column.
+        """
         now = datetime.now(timezone.utc).isoformat()
         db = sqlite3.connect(str(self.db_path))
         db.execute(

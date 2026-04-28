@@ -8,7 +8,7 @@ import json
 import logging
 import os
 import threading
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from time import sleep
 
 import stomp
@@ -21,9 +21,10 @@ logger = logging.getLogger("crossing.feed")
 class NRODListener(stomp.ConnectionListener):
     """Handles incoming STOMP messages from Network Rail."""
 
-    def __init__(self, tracker: TrainTracker, on_message_callback=None):
+    def __init__(self, tracker: TrainTracker, on_message_callback=None, on_disconnect_callback=None):
         self.tracker = tracker
         self.on_message_callback = on_message_callback
+        self.on_disconnect_callback = on_disconnect_callback
         self.connected = False
         self.last_message_time: datetime | None = None
 
@@ -59,6 +60,8 @@ class NRODListener(stomp.ConnectionListener):
     def on_disconnected(self):
         self.connected = False
         logger.warning("❌ Disconnected from NROD")
+        if self.on_disconnect_callback:
+            self.on_disconnect_callback()
 
     def on_error(self, frame):
         logger.error(f"STOMP error: {frame.body}")
@@ -145,12 +148,20 @@ class NRODListener(stomp.ConnectionListener):
 
     @staticmethod
     def _parse_td_time(time_str: str) -> datetime:
-        """Parse TD timestamp (HHMM format, today's date assumed)."""
+        """Parse TD timestamp (HHMM format, today's date assumed).
+
+        Handles midnight rollover: if the parsed time is more than 6 hours
+        ahead of now, assume it's from yesterday.
+        """
         now = datetime.now(timezone.utc)
         try:
             hour = int(time_str[:2])
             minute = int(time_str[2:4])
-            return now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+            parsed = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+            # Handle midnight rollover
+            if (parsed - now).total_seconds() > 6 * 3600:
+                parsed -= timedelta(days=1)
+            return parsed
         except (ValueError, IndexError):
             return now
 
@@ -160,9 +171,10 @@ class NRODFeed:
 
     def __init__(self, tracker: TrainTracker, on_message_callback=None):
         self.tracker = tracker
-        self.listener = NRODListener(tracker, on_message_callback)
+        self.listener = NRODListener(tracker, on_message_callback, on_disconnect_callback=self._reconnect)
         self.connection: stomp.Connection | None = None
         self._running = False
+        self._reconnect_backoffs = [5, 10, 30, 60, 120]
 
     def start(self):
         """Connect to NROD and subscribe to feeds."""
@@ -172,6 +184,13 @@ class NRODFeed:
         if not username or not password:
             logger.error("❌ NROD_USERNAME and NROD_PASSWORD must be set")
             return False
+
+        # Disconnect existing connection cleanly before reconnecting
+        if self.connection and self.connection.is_connected():
+            try:
+                self.connection.disconnect()
+            except Exception:
+                pass
 
         self.connection = stomp.Connection12(
             [("publicdatafeeds.networkrail.co.uk", 61618)],
@@ -208,6 +227,33 @@ class NRODFeed:
 
         self._running = True
         return True
+
+    def _reconnect(self):
+        """Attempt to reconnect with exponential backoff. Runs in a daemon thread."""
+        if not self._running:
+            return
+
+        def _do_reconnect():
+            attempt = 0
+            while self._running:
+                delay = self._reconnect_backoffs[min(attempt, len(self._reconnect_backoffs) - 1)]
+                logger.info(f"🔄 Reconnecting to NROD in {delay}s (attempt {attempt + 1})")
+                sleep(delay)
+
+                if not self._running:
+                    return
+
+                try:
+                    if self.start():
+                        logger.info("✅ Reconnected to NROD successfully")
+                        return
+                except Exception as e:
+                    logger.error(f"❌ Reconnect attempt {attempt + 1} failed: {e}")
+
+                attempt += 1
+
+        thread = threading.Thread(target=_do_reconnect, daemon=True)
+        thread.start()
 
     def stop(self):
         """Disconnect from NROD."""
