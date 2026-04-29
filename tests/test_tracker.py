@@ -267,10 +267,21 @@ class TestGetActiveTrainsAndCleanup:
 
     def test_stale_trains_marked_lost(self, tracker, now):
         tracker.handle_td_step("", "A027", "1A23", now)
+        # Clear the predicted time so the train is genuinely stale
+        tracker.trains["1A23"].predicted_at_crossing = None
         with freeze_time(now + timedelta(seconds=130)):
             active = tracker.get_active_trains()
         assert len(active) == 0
         assert tracker.trains["1A23"].phase == TrainPhase.LOST
+
+    def test_stale_train_kept_if_prediction_in_future(self, tracker, now):
+        """Train with a future predicted_at_crossing is not marked lost even if stale."""
+        tracker.handle_td_step("", "A027", "1A23", now)
+        tracker.trains["1A23"].predicted_at_crossing = now + timedelta(seconds=180)
+        with freeze_time(now + timedelta(seconds=130)):
+            active = tracker.get_active_trains()
+        assert len(active) == 1
+        assert tracker.trains["1A23"].phase == TrainPhase.APPROACHING
 
     def test_old_cleared_trains_removed(self, tracker, now):
         tracker.handle_td_step("", "0034", "1A23", now)
