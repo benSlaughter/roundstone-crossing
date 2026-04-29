@@ -283,6 +283,16 @@ class TestGetActiveTrainsAndCleanup:
         assert len(active) == 1
         assert tracker.trains["1A23"].phase == TrainPhase.APPROACHING
 
+    def test_stale_train_kept_within_grace_period(self, tracker, now):
+        """Train kept active if predicted_at_crossing is in the recent past (grace period)."""
+        tracker.handle_td_step("", "A027", "1A23", now)
+        # Prediction was for now+120s, check at now+150s (30s past prediction, within 60s grace)
+        tracker.trains["1A23"].predicted_at_crossing = now + timedelta(seconds=120)
+        with freeze_time(now + timedelta(seconds=150)):
+            active = tracker.get_active_trains()
+        assert len(active) == 1
+        assert tracker.trains["1A23"].phase == TrainPhase.APPROACHING
+
     def test_old_cleared_trains_removed(self, tracker, now):
         tracker.handle_td_step("", "0034", "1A23", now)
         assert tracker.trains["1A23"].phase == TrainPhase.CLEARED
