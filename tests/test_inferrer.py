@@ -258,6 +258,19 @@ class TestOpeningPredictedState:
         expected_open = NOW + timedelta(seconds=8)  # post_clearance_secs
         assert abs((status.predicted_change - expected_open).total_seconds()) < 2
 
+    def test_closing_to_clear_skips_opening_predicted(self, inferrer, make_train):
+        """If trains vanish from CLOSING_PREDICTED (never closed), go straight to OPEN."""
+        train = make_train(
+            phase=TrainPhase.STRIKE_IN,
+            predicted_at_crossing=NOW + timedelta(seconds=30),
+        )
+        inferrer.update([train], FEED_RECENT)
+        assert inferrer.status.state == CrossingState.CLOSING_PREDICTED
+
+        # Train disappears (cleared/lost) — barriers never actually closed
+        status = inferrer.update([], FEED_RECENT)
+        assert status.state == CrossingState.OPEN  # NOT OPENING_PREDICTED
+
 
 @freeze_time(NOW)
 class TestBarriersStayClosedForConsecutiveTrains:

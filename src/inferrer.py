@@ -46,9 +46,6 @@ class CrossingInferrer:
                 self._last_clear_time = None
             return self.status
 
-        # Track when trains were last present (for OPENING_PREDICTED after they clear)
-        self._last_clear_time = now
-
         # Classify based on the "most advanced" train phase
         phases = [t.phase for t in active_trains]
 
@@ -60,12 +57,14 @@ class CrossingInferrer:
         if TrainPhase.AT_CROSSING in phases:
             # Train is at the crossing — barriers almost certainly down
             self._transition(CrossingState.CLOSED_INFERRED, confidence=0.9)
+            self._last_clear_time = now
             self.status.predicted_change = self._predict_opening(active_trains)
             self.status.predicted_next_state = CrossingState.OPENING_PREDICTED
 
         elif was_closed:
             # Barriers already down — keep them down while any trains remain
             self._transition(CrossingState.CLOSED_INFERRED, confidence=0.85)
+            self._last_clear_time = now
             self.status.predicted_change = self._predict_opening(active_trains)
             self.status.predicted_next_state = CrossingState.OPENING_PREDICTED
 
