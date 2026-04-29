@@ -156,8 +156,8 @@ class TestMultiTrainOpening:
         train = make_train(phase=TrainPhase.AT_CROSSING)
         status = inferrer.update([train], FEED_RECENT)
         assert status.predicted_change is not None
-        # crossing_clearance_secs=10 + post_clearance_secs=8 = 18s
-        expected = NOW + timedelta(seconds=10 + 8)
+        # crossing_clearance_secs=10 + post_clearance_secs=5 = 15s
+        expected = NOW + timedelta(seconds=10 + 5)
         assert abs((status.predicted_change - expected).total_seconds()) < 2
 
     def test_two_close_trains_merge_windows(self, inferrer, make_train):
@@ -173,7 +173,7 @@ class TestMultiTrainOpening:
         assert status.predicted_change is not None
         # Opening should be after the SECOND train clears:
         # strike_in clears at NOW+30+10=NOW+40, plus post_clearance=8 → NOW+48
-        expected = NOW + timedelta(seconds=30 + 10 + 8)
+        expected = NOW + timedelta(seconds=30 + 10 + 5)
         assert abs((status.predicted_change - expected).total_seconds()) < 2
 
     def test_two_distant_trains_first_determines_opening(self, inferrer, make_train):
@@ -193,7 +193,7 @@ class TestMultiTrainOpening:
         assert status.predicted_change is not None
         # Opening should be after the FIRST train only:
         # AT_CROSSING clears at NOW+10, plus post_clearance=8 → NOW+18
-        expected = NOW + timedelta(seconds=10 + 8)
+        expected = NOW + timedelta(seconds=10 + 5)
         assert abs((status.predicted_change - expected).total_seconds()) < 2
 
     def test_at_station_without_eta_excluded(self, inferrer, make_train):
@@ -206,7 +206,7 @@ class TestMultiTrainOpening:
         )
         status = inferrer.update([at_crossing, at_station], FEED_RECENT)
         # Should only consider the AT_CROSSING train
-        expected = NOW + timedelta(seconds=10 + 8)
+        expected = NOW + timedelta(seconds=10 + 5)
         assert abs((status.predicted_change - expected).total_seconds()) < 2
 
     def test_strike_in_with_eta_extends_closure(self, inferrer, make_train):
@@ -219,7 +219,7 @@ class TestMultiTrainOpening:
         )
         status = inferrer.update([at_crossing, strike_in], FEED_RECENT)
         # Strike-in clears at NOW+20+10=NOW+30, plus post_clearance=8 → NOW+38
-        expected = NOW + timedelta(seconds=20 + 10 + 8)
+        expected = NOW + timedelta(seconds=20 + 10 + 5)
         assert abs((status.predicted_change - expected).total_seconds()) < 2
 
 
@@ -255,7 +255,7 @@ class TestOpeningPredictedState:
         assert status.state == CrossingState.OPENING_PREDICTED
         # predicted_change = _last_clear_time + post_clearance_secs
         # _last_clear_time was set to NOW when trains were active
-        expected_open = NOW + timedelta(seconds=8)  # post_clearance_secs
+        expected_open = NOW + timedelta(seconds=5)  # post_clearance_secs
         assert abs((status.predicted_change - expected_open).total_seconds()) < 2
 
     def test_closing_to_clear_skips_opening_predicted(self, inferrer, make_train):

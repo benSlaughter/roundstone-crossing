@@ -63,11 +63,13 @@ timing:
   pre_closure_secs: 120    # Initial estimate, will be calibrated
   
   # How long after the train clears does it take for barriers to raise?
-  # Observed 2026-04-28: ~5-8s after last train to barriers rising
-  post_clearance_secs: 8
+  # Observed: consistently 14-15s from last train to barriers rising
+  # (crossing_clearance + post_clearance = ~15s total)
+  post_clearance_secs: 5
 
   # How long it takes a train to physically clear the crossing zone
   # At 70mph a 200m train clears in ~6s; allow margin for slower trains
+  # Observed total (clearance + post) = 14-15s across 4 windows
   crossing_clearance_secs: 10
 
   # Minimum warning time per regulations (GK/RT0192)
