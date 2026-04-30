@@ -347,14 +347,19 @@ class TrainTracker:
     def _cleanup_stale(self):
         """Mark stale trains as LOST, remove very old ones."""
         now = datetime.now(timezone.utc)
-        grace_secs = 60  # Allow trains to arrive up to 60s late
+        grace_secs = 60  # Allow trains to arrive up to 60s past their prediction
+        max_stale_secs = 300  # Absolute cap — no train survives 5 min without an update
         for hc, train in list(self.trains.items()):
             if train.is_stale and train.phase != TrainPhase.LOST:
-                # Don't mark as lost if the train is still expected at the crossing soon
-                if (train.predicted_at_crossing
-                        and (train.predicted_at_crossing - now).total_seconds() > -grace_secs):
-                    continue
-                logger.info(f"Train {hc} marked as LOST (no update for {train.age_secs:.0f}s)")
+                age = train.age_secs
+                # Absolute cap — mark LOST regardless of prediction
+                if age <= max_stale_secs and train.predicted_at_crossing:
+                    secs_past = (now - train.predicted_at_crossing).total_seconds()
+                    if secs_past < grace_secs:
+                        logger.debug(f"Train {hc} stale ({age:.0f}s) but within "
+                                     f"grace ({secs_past:.0f}s past prediction), keeping")
+                        continue
+                logger.info(f"Train {hc} marked as LOST (no update for {age:.0f}s)")
                 train.phase = TrainPhase.LOST
             # Remove trains that cleared or were lost more than 3 minutes ago
             if train.phase in (TrainPhase.CLEARED, TrainPhase.LOST) and train.age_secs > 180:

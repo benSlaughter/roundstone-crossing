@@ -57,6 +57,9 @@ class NRODListener(stomp.ConnectionListener):
 
     def on_connected(self, frame):
         self.connected = True
+        self.last_message_time = datetime.now(timezone.utc)
+        if self.on_message_callback:
+            self.on_message_callback(self.last_message_time)
         logger.info("Connected to NROD")
 
     def on_disconnected(self):
