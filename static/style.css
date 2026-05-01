@@ -532,3 +532,91 @@ footer {
 }
 .upcoming-table .status-badge.approaching { background: #92400e33; color: #fbbf24; }
 .upcoming-table .status-badge.at_platform { background: #4d7c0f33; color: #84cc16; }
+
+/* Predictions panel */
+.predictions-panel {
+  display: none;
+  font-size: 0.82rem;
+}
+.pred-current {
+  background: #1c1917;
+  border: 1px solid #44403c;
+  border-radius: 0.5rem;
+  padding: 0.6rem 1rem;
+  margin-bottom: 0.75rem;
+  font-size: 0.85rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.pred-current-trains {
+  display: flex;
+  gap: 0.5rem;
+}
+.pred-train {
+  font-family: "SF Mono", "Fira Code", monospace;
+  font-weight: 600;
+  font-size: 0.75rem;
+}
+.pred-card {
+  background: #18181b;
+  border: 1px solid #27272a;
+  border-radius: 0.5rem;
+  padding: 0.75rem 1rem;
+  margin-bottom: 0.5rem;
+  border-left: 3px solid #3f3f46;
+}
+.pred-card.imminent { border-left-color: #f97316; background: #1a1008; }
+.pred-card.active { border-left-color: #ef4444; background: #1a0808; }
+.pred-card.soon { border-left-color: #fbbf24; }
+.pred-card.later { border-left-color: #3b82f6; }
+.pred-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.5rem;
+}
+.pred-times {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.8rem;
+}
+.pred-close { color: #fca5a5; font-weight: 600; }
+.pred-arrow { color: #52525b; }
+.pred-open { color: #86efac; font-weight: 600; }
+.pred-dur { color: #71717a; font-size: 0.7rem; margin-left: 0.3rem; }
+.pred-until {
+  font-weight: 700;
+  font-size: 0.75rem;
+  padding: 0.15rem 0.5rem;
+  border-radius: 0.25rem;
+  background: #27272a;
+  color: #a1a1aa;
+}
+.pred-card.imminent .pred-until { background: #431407; color: #fb923c; }
+.pred-card.active .pred-until { background: #450a0a; color: #fca5a5; }
+.pred-card.soon .pred-until { background: #422006; color: #fbbf24; }
+.pred-trains {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+.pred-train-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.75rem;
+}
+.pred-eta {
+  font-family: "SF Mono", "Fira Code", monospace;
+  color: #a1a1aa;
+  font-size: 0.7rem;
+}
+.pred-route {
+  color: #71717a;
+  font-size: 0.65rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

@@ -267,7 +267,89 @@ async function updateHistory() {
   } catch (e) { /* ignore */ }
 }
 
-// Initial load
+// Predictions panel
+let predictionsVisible = false;
+let predictionsInterval = null;
+
+async function updatePredictions() {
+  try {
+    const data = await fetchJSON('/predictions/windows');
+    const list = document.getElementById('predictions-list');
+    const currentEl = document.getElementById('predictions-current');
+    const now = new Date();
+
+    // Show current closure if active
+    if (data.current_closure) {
+      const cc = data.current_closure;
+      const stateLabel = STATE_CONFIG[cc.state]?.label || cc.state;
+      const stateIcon = STATE_CONFIG[cc.state]?.icon || '?';
+      const trains = cc.trains.map(t =>
+        `<span class="pred-train">${esc(t.headcode)} ${DIRECTION_LABELS[t.direction] || ''}</span>`
+      ).join(' ');
+      currentEl.innerHTML = `
+        <div class="pred-current">
+          <span>${stateIcon} ${stateLabel} now</span>
+          <div class="pred-current-trains">${trains}</div>
+        </div>`;
+    } else {
+      currentEl.innerHTML = '';
+    }
+
+    if (!data.windows || data.windows.length === 0) {
+      list.innerHTML = '<div class="empty">No upcoming closures predicted</div>';
+      return;
+    }
+
+    list.innerHTML = data.windows.map(w => {
+      const closeAt = new Date(w.close_at);
+      const openAt = new Date(w.open_at);
+      const minsUntil = Math.max(0, Math.round((closeAt - now) / 60000));
+      const durMins = Math.floor(w.duration_secs / 60);
+      const durSecs = w.duration_secs % 60;
+      const durText = durSecs > 0 ? `${durMins}m ${durSecs}s` : `${durMins}m`;
+
+      // Proximity class
+      let proximity = 'later';
+      if (closeAt <= now) proximity = 'active';
+      else if (minsUntil <= 5) proximity = 'imminent';
+      else if (minsUntil <= 15) proximity = 'soon';
+
+      const untilText = proximity === 'active' ? 'Now'
+        : minsUntil < 1 ? '<1 min'
+        : `${minsUntil} min`;
+
+      const closeTime = closeAt.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+      const openTime = openAt.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+
+      const trains = w.trains.map(t => {
+        const dir = t.direction === 'east' ? '↗' : '↙';
+        const dirColor = t.direction === 'east' ? '#60a5fa' : '#f472b6';
+        return `
+          <div class="pred-train-row">
+            <span style="color:${dirColor}">${dir}</span>
+            <strong>${esc(t.headcode)}</strong>
+            <span class="pred-eta">@ ${esc(t.crossing_eta)}</span>
+            <span class="pred-route">${esc(t.origin)} → ${esc(t.destination)}</span>
+          </div>`;
+      }).join('');
+
+      return `
+        <div class="pred-card ${proximity}">
+          <div class="pred-header">
+            <div class="pred-times">
+              <span class="pred-close">🔴 ${closeTime}</span>
+              <span class="pred-arrow">→</span>
+              <span class="pred-open">🟢 ${openTime}</span>
+              <span class="pred-dur">${durText}</span>
+            </div>
+            <div class="pred-until">${untilText}</div>
+          </div>
+          <div class="pred-trains">${trains}</div>
+        </div>`;
+    }).join('');
+  } catch (e) { console.error('Predictions fetch error:', e); }
+}
+
 // Upcoming trains panel
 let upcomingStation = 'ANG';
 let upcomingVisible = false;
@@ -276,6 +358,7 @@ let upcomingInterval = null;
 function switchTab(name, btn) {
   // Hide all tab contents
   document.getElementById('tab-map').style.display = 'none';
+  document.getElementById('tab-predictions').style.display = 'none';
   document.getElementById('tab-upcoming').style.display = 'none';
   document.getElementById('tab-history').style.display = 'none';
   document.getElementById('tab-info').style.display = 'none';
@@ -296,6 +379,20 @@ function switchTab(name, btn) {
     if (upcomingInterval) {
       clearInterval(upcomingInterval);
       upcomingInterval = null;
+    }
+  }
+  // Manage predictions polling
+  if (name === 'predictions') {
+    if (!predictionsVisible) {
+      predictionsVisible = true;
+      updatePredictions();
+      predictionsInterval = setInterval(updatePredictions, 30000);
+    }
+  } else {
+    predictionsVisible = false;
+    if (predictionsInterval) {
+      clearInterval(predictionsInterval);
+      predictionsInterval = null;
     }
   }
 }
@@ -374,6 +471,10 @@ document.addEventListener('visibilitychange', () => {
             clearInterval(upcomingInterval);
             upcomingInterval = null;
         }
+        if (predictionsInterval) {
+            clearInterval(predictionsInterval);
+            predictionsInterval = null;
+        }
     } else {
         // Refresh immediately when tab becomes visible again
         updateStatus();
@@ -382,6 +483,10 @@ document.addEventListener('visibilitychange', () => {
         if (upcomingVisible) {
             updateUpcoming();
             upcomingInterval = setInterval(updateUpcoming, 30000);
+        }
+        if (predictionsVisible) {
+            updatePredictions();
+            predictionsInterval = setInterval(updatePredictions, 30000);
         }
     }
 });

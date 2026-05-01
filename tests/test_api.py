@@ -159,6 +159,133 @@ def test_sf_summary_empty(client):
     assert data == {"addresses": []}
 
 
+# ── Predictions windows endpoint ─────────────────────────────────────
+
+def test_predictions_windows_no_rtt(client):
+    """Without RTT, returns empty windows with error."""
+    resp = client.get("/predictions/windows")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["windows"] == []
+    assert "error" in data
+
+
+def test_predictions_windows_empty(tracker, inferrer, history_db):
+    """With RTT but no upcoming services, returns empty windows."""
+    mock_rtt = MagicMock()
+    mock_rtt.get_upcoming.return_value = []
+    app = create_app(tracker, inferrer, history_db, rtt_client=mock_rtt)
+    client = TestClient(app)
+    resp = client.get("/predictions/windows")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["windows"] == []
+    assert data["current_closure"] is None
+    assert "generated_at" in data
+
+
+def test_predictions_windows_eastbound(tracker, inferrer, history_db):
+    """Eastbound train at ANG produces a closure window."""
+    mock_rtt = MagicMock()
+    from datetime import datetime, timezone, timedelta
+    future = datetime.now(timezone.utc) + timedelta(minutes=10)
+    dep_iso = future.isoformat()
+    mock_rtt.get_upcoming.side_effect = lambda crs, limit: [
+        {
+            "headcode": "1H23", "direction": "east",
+            "departure_iso": dep_iso, "arrival_iso": None,
+            "origin": "Littlehampton", "destination": "London Victoria",
+        }
+    ] if crs == "ANG" else []
+    app = create_app(tracker, inferrer, history_db, rtt_client=mock_rtt)
+    client = TestClient(app)
+    resp = client.get("/predictions/windows")
+    data = resp.json()
+    assert len(data["windows"]) == 1
+    w = data["windows"][0]
+    assert len(w["trains"]) == 1
+    assert w["trains"][0]["headcode"] == "1H23"
+    assert w["trains"][0]["direction"] == "east"
+    assert w["duration_secs"] > 0
+
+
+def test_predictions_windows_westbound(tracker, inferrer, history_db):
+    """Westbound train at GBS produces a closure window."""
+    mock_rtt = MagicMock()
+    from datetime import datetime, timezone, timedelta
+    future = datetime.now(timezone.utc) + timedelta(minutes=10)
+    dep_iso = future.isoformat()
+    mock_rtt.get_upcoming.side_effect = lambda crs, limit: [
+        {
+            "headcode": "1N20", "direction": "west",
+            "departure_iso": dep_iso, "arrival_iso": None,
+            "origin": "Brighton", "destination": "Southampton Central",
+        }
+    ] if crs == "GBS" else []
+    app = create_app(tracker, inferrer, history_db, rtt_client=mock_rtt)
+    client = TestClient(app)
+    resp = client.get("/predictions/windows")
+    data = resp.json()
+    assert len(data["windows"]) == 1
+    assert data["windows"][0]["trains"][0]["headcode"] == "1N20"
+    assert data["windows"][0]["trains"][0]["direction"] == "west"
+
+
+def test_predictions_windows_filters_wrong_direction(tracker, inferrer, history_db):
+    """Westbound at ANG (past crossing) and eastbound at GBS (past crossing) are excluded."""
+    mock_rtt = MagicMock()
+    from datetime import datetime, timezone, timedelta
+    future = datetime.now(timezone.utc) + timedelta(minutes=10)
+    dep_iso = future.isoformat()
+    mock_rtt.get_upcoming.side_effect = lambda crs, limit: [
+        {"headcode": "1X99", "direction": "west", "departure_iso": dep_iso,
+         "arrival_iso": None, "origin": "A", "destination": "B"}
+    ] if crs == "ANG" else [
+        {"headcode": "1Y99", "direction": "east", "departure_iso": dep_iso,
+         "arrival_iso": None, "origin": "C", "destination": "D"}
+    ]
+    app = create_app(tracker, inferrer, history_db, rtt_client=mock_rtt)
+    client = TestClient(app)
+    resp = client.get("/predictions/windows")
+    data = resp.json()
+    assert data["windows"] == []
+
+
+def test_predictions_windows_merges_overlapping(tracker, inferrer, history_db):
+    """Two trains close together get merged into one window."""
+    mock_rtt = MagicMock()
+    from datetime import datetime, timezone, timedelta
+    future = datetime.now(timezone.utc) + timedelta(minutes=10)
+    dep1 = future.isoformat()
+    dep2 = (future + timedelta(minutes=1)).isoformat()
+    mock_rtt.get_upcoming.side_effect = lambda crs, limit: [
+        {"headcode": "1A01", "direction": "east", "departure_iso": dep1,
+         "arrival_iso": None, "origin": "A", "destination": "B"},
+        {"headcode": "1A02", "direction": "east", "departure_iso": dep2,
+         "arrival_iso": None, "origin": "C", "destination": "D"},
+    ] if crs == "ANG" else []
+    app = create_app(tracker, inferrer, history_db, rtt_client=mock_rtt)
+    client = TestClient(app)
+    resp = client.get("/predictions/windows")
+    data = resp.json()
+    assert len(data["windows"]) == 1
+    assert len(data["windows"][0]["trains"]) == 2
+
+
+def test_predictions_windows_skips_no_departure(tracker, inferrer, history_db):
+    """Services without departure_iso are excluded."""
+    mock_rtt = MagicMock()
+    mock_rtt.get_upcoming.side_effect = lambda crs, limit: [
+        {"headcode": "1Z99", "direction": "east", "departure_iso": None,
+         "arrival_iso": None, "origin": "A", "destination": "B"}
+    ] if crs == "ANG" else []
+    app = create_app(tracker, inferrer, history_db, rtt_client=mock_rtt)
+    client = TestClient(app)
+    resp = client.get("/predictions/windows")
+    data = resp.json()
+    assert data["windows"] == []
+
+
 def test_sf_summary_with_data(history_db, tracker, inferrer):
     from freezegun import freeze_time
     with freeze_time("2025-06-15 10:00:00", tz_offset=0):

@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Roundstone Crossing</title>
-  <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="/static/style.css?v=2">
 </head>
 <body>
   <h1>Roundstone Crossing</h1>
@@ -24,6 +24,7 @@
 
   <div class="tab-bar" id="tab-bar">
     <button class="active" onclick="switchTab('map', this)">Map</button>
+    <button onclick="switchTab('predictions', this)">Predictions</button>
     <button onclick="switchTab('upcoming', this)">Upcoming</button>
     <button onclick="switchTab('history', this)">History</button>
     <button onclick="switchTab('info', this)">Info</button>
@@ -59,6 +60,11 @@
       <!-- Trains rendered by JS -->
     </div>
     </div><!-- end tab-map -->
+
+    <div class="predictions-panel" id="tab-predictions" style="display:none">
+      <div id="predictions-current"></div>
+      <div id="predictions-list"><div class="empty">Select Predictions tab to load…</div></div>
+    </div>
 
     <div class="upcoming-panel" id="tab-upcoming" style="display:none">
       <div class="sub-tabs">
@@ -126,6 +132,6 @@
 
   <footer><span class="pulse" id="pulse"></span><span id="footer-text">Connecting…</span></footer>
 
-  <script src="/static/app.js"></script>
+  <script src="/static/app.js?v=2"></script>
 </body>
 </html>
