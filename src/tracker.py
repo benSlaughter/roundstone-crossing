@@ -3,10 +3,11 @@ Train tracker — maintains per-train objects from TD and TRUST messages.
 Correlates TD berth steps with TRUST train identities.
 """
 
+from __future__ import annotations
+
 import logging
 import threading
 from datetime import datetime, timezone
-from typing import Optional
 
 from .models import TrackedTrain, TrainPhase, Direction
 
@@ -165,7 +166,7 @@ class TrainTracker:
                 train.last_update = timestamp or datetime.now(timezone.utc)
 
     def handle_trust_movement(self, train_id: str, stanox: str, event_type: str,
-                               actual_time: datetime, headcode: Optional[str] = None):
+                               actual_time: datetime, headcode: str | None = None):
         """Process a TRUST train movement message. Used for identity, timing, and clearing."""
         with self._lock:
             trust_config = self.config.get("trust", {}).get("timing_points", [])
@@ -302,7 +303,7 @@ class TrainTracker:
                 logger.debug(f"{headcode}: RTT {status} at {station} P{platform}")
                 train.last_update = now
 
-    def _classify_berth(self, berth: str, preferred_direction: Optional[Direction] = None) -> tuple[Optional[TrainPhase], Optional[Direction]]:
+    def _classify_berth(self, berth: str, preferred_direction: Direction | None = None) -> tuple[TrainPhase | None, Direction | None]:
         """Determine what phase and direction a berth represents.
         
         If the train already has a known direction, check that direction first
@@ -323,7 +324,7 @@ class TrainTracker:
                 return TrainPhase.APPROACHING, direction
         return None, None
 
-    def _estimate_arrival(self, train: TrackedTrain) -> Optional[datetime]:
+    def _estimate_arrival(self, train: TrackedTrain) -> datetime | None:
         """Estimate when the train will reach the crossing based on current phase + heuristics."""
         timing = self.config.get("timing", {})
         from datetime import timedelta

@@ -24,10 +24,15 @@ class HistoryLogger:
         self._current_interval_id: int | None = None
         self._current_state: CrossingState | None = None
 
-    def _init_db(self):
+    def _connect(self) -> sqlite3.Connection:
+        """Create a DB connection with consistent settings."""
         db = sqlite3.connect(str(self.db_path))
         db.execute("PRAGMA journal_mode=WAL")
         db.execute("PRAGMA busy_timeout=5000")
+        return db
+
+    def _init_db(self):
+        db = self._connect()
 
         db.execute("""
             CREATE TABLE IF NOT EXISTS state_intervals (
@@ -117,7 +122,7 @@ class HistoryLogger:
     def log_state_change(self, status: CrossingStatus):
         """Log a crossing state transition."""
         now = datetime.now(timezone.utc).isoformat()
-        db = sqlite3.connect(str(self.db_path))
+        db = self._connect()
 
         # Close previous interval
         if self._current_interval_id and self._current_state != status.state:
@@ -148,7 +153,7 @@ class HistoryLogger:
         A future schema migration could rename this column.
         """
         now = datetime.now(timezone.utc).isoformat()
-        db = sqlite3.connect(str(self.db_path))
+        db = self._connect()
         db.execute(
             """INSERT INTO train_passages
                (headcode, train_id, direction, first_seen, observed_at_crossing,
@@ -173,7 +178,7 @@ class HistoryLogger:
                         to_berth: str = None, phase: str = None, direction: str = None):
         """Log a berth step or phase change for a train."""
         now = datetime.now(timezone.utc).isoformat()
-        db = sqlite3.connect(str(self.db_path))
+        db = self._connect()
         db.execute(
             "INSERT INTO train_events (headcode, direction, event, from_berth, to_berth, phase, timestamp) "
             "VALUES (?, ?, ?, ?, ?, ?, ?)",
@@ -185,7 +190,7 @@ class HistoryLogger:
     def log_raw_event(self, event_type: str, source: str, data: str):
         """Log a raw TD/TRUST message for debugging and analysis."""
         now = datetime.now(timezone.utc).isoformat()
-        db = sqlite3.connect(str(self.db_path))
+        db = self._connect()
         db.execute(
             "INSERT INTO raw_events (event_type, source, data, timestamp) VALUES (?, ?, ?, ?)",
             (event_type, source, data, now),
@@ -195,7 +200,7 @@ class HistoryLogger:
 
     def get_intervals(self, since: str = None, limit: int = 100) -> list[dict]:
         """Query historical state intervals."""
-        db = sqlite3.connect(str(self.db_path))
+        db = self._connect()
         db.row_factory = sqlite3.Row
         if since:
             rows = db.execute(
@@ -211,7 +216,7 @@ class HistoryLogger:
 
     def get_passages(self, since: str = None, limit: int = 100) -> list[dict]:
         """Query historical train passages."""
-        db = sqlite3.connect(str(self.db_path))
+        db = self._connect()
         db.row_factory = sqlite3.Row
         if since:
             rows = db.execute(
@@ -227,7 +232,7 @@ class HistoryLogger:
 
     def get_train_events(self, headcode: str = None, since: str = None, limit: int = 200) -> list[dict]:
         """Query train berth stepping events for calibration."""
-        db = sqlite3.connect(str(self.db_path))
+        db = self._connect()
         db.row_factory = sqlite3.Row
         if headcode:
             rows = db.execute(
@@ -248,7 +253,7 @@ class HistoryLogger:
 
     def get_stats(self) -> dict:
         """Get summary statistics."""
-        db = sqlite3.connect(str(self.db_path))
+        db = self._connect()
         stats = {}
         row = db.execute("SELECT COUNT(*) FROM state_intervals").fetchone()
         stats["total_intervals"] = row[0]
@@ -266,7 +271,7 @@ class HistoryLogger:
         # Convert hex to 8-bit binary string
         data_bin = format(int(data_hex, 16), '08b')
         now = datetime.now(timezone.utc).isoformat()
-        db = sqlite3.connect(str(self.db_path))
+        db = self._connect()
         db.execute(
             "INSERT INTO sf_events (timestamp, area_id, address, data_hex, data_bin) VALUES (?, ?, ?, ?, ?)",
             (now, area_id, address, data_hex, data_bin),
@@ -277,7 +282,7 @@ class HistoryLogger:
 
     def get_sf_events(self, since: str = None, address: str = None, limit: int = 100) -> list[dict]:
         """Query S-Class signalling events."""
-        db = sqlite3.connect(str(self.db_path))
+        db = self._connect()
         db.row_factory = sqlite3.Row
         conditions = []
         params = []
@@ -300,7 +305,7 @@ class HistoryLogger:
     def submit_feedback(self, message: str, user_agent: str = None) -> int:
         """Store a feedback submission. Returns the feedback ID."""
         now = datetime.now(timezone.utc).isoformat()
-        db = sqlite3.connect(str(self.db_path))
+        db = self._connect()
         cur = db.execute(
             "INSERT INTO feedback (message, user_agent, created_at) VALUES (?, ?, ?)",
             (message, user_agent, now),
@@ -313,7 +318,7 @@ class HistoryLogger:
 
     def get_feedback(self, limit: int = 50) -> list[dict]:
         """Retrieve recent feedback submissions."""
-        db = sqlite3.connect(str(self.db_path))
+        db = self._connect()
         db.row_factory = sqlite3.Row
         rows = db.execute(
             "SELECT * FROM feedback ORDER BY created_at DESC LIMIT ?", (limit,)
@@ -323,7 +328,7 @@ class HistoryLogger:
 
     def get_sf_summary(self) -> list[dict]:
         """Summary of S-Class addresses seen: distinct addresses, change counts, last seen."""
-        db = sqlite3.connect(str(self.db_path))
+        db = self._connect()
         db.row_factory = sqlite3.Row
         rows = db.execute("""
             SELECT address, COUNT(*) as change_count,

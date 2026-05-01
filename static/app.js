@@ -192,7 +192,7 @@ async function updateStatus() {
             <span class="train-hc">${esc(t.headcode)}</span>
             <span class="train-info">${DIRECTION_LABELS[t.direction] || '?'}</span>
           </div>
-          <span class="phase-badge phase-${t.phase}">${t.phase.replace('_', ' ')}</span>
+          <span class="phase-badge phase-${esc(t.phase)}">${esc(t.phase.replace('_', ' '))}</span>
         </div>
       `).join('');
     } else {
@@ -257,7 +257,7 @@ async function updateHistory() {
         <div class="history-item">
           <div>
             <span>${cfg.icon || '?'}</span>
-            <span class="history-state">${cfg.label || iv.state}</span>
+            <span class="history-state">${cfg.label || esc(iv.state)}</span>
             <span class="history-duration">· ${dur}</span>
           </div>
           <span class="history-time">${formatTime(iv.started_at)}</span>
@@ -420,14 +420,14 @@ async function updateUpcoming() {
       return;
     }
     body.innerHTML = data.services.map(s => {
-      let arr = s.arrival || '—';
-      if (s.arrival_scheduled) arr += `<span class="delayed">${s.arrival_scheduled}</span>`;
-      let dep = s.departure || '—';
-      if (s.departure_scheduled) dep += `<span class="delayed">${s.departure_scheduled}</span>`;
+      let arr = s.arrival ? esc(s.arrival) : '—';
+      if (s.arrival_scheduled) arr += `<span class="delayed">${esc(s.arrival_scheduled)}</span>`;
+      let dep = s.departure ? esc(s.departure) : '—';
+      if (s.departure_scheduled) dep += `<span class="delayed">${esc(s.departure_scheduled)}</span>`;
       const statusMap = { 'APPROACHING': 'approaching', 'AT_PLATFORM': 'at_platform', 'ARRIVING': 'approaching' };
       const badgeClass = statusMap[s.status] || '';
       const statusText = s.status ? s.status.replace('_', ' ').toLowerCase() : '';
-      const statusBadge = statusText ? `<span class="status-badge ${badgeClass}">${statusText}</span>` : '';
+      const statusBadge = statusText ? `<span class="status-badge ${badgeClass}">${esc(statusText)}</span>` : '';
       const dirArrow = s.direction === 'east' ? '↗' : s.direction === 'west' ? '↙' : '';
       return `<tr>
         <td style="color:${s.direction === 'east' ? '#60a5fa' : '#f472b6'}">${dirArrow}</td>
@@ -492,6 +492,33 @@ document.addEventListener('visibilitychange', () => {
 });
 
 startPolling();
+
+// Event listeners (replacing inline onclick/onsubmit handlers for CSP compliance)
+document.querySelectorAll('#tab-bar button[data-tab]').forEach(btn => {
+  btn.addEventListener('click', () => switchTab(btn.dataset.tab, btn));
+});
+
+document.getElementById('berth-toggle-btn').addEventListener('click', () => {
+  document.getElementById('track-area').classList.toggle('show-berths');
+});
+
+document.querySelectorAll('[data-station]').forEach(btn => {
+  btn.addEventListener('click', () => switchUpcomingStation(btn.dataset.station, btn));
+});
+
+document.querySelectorAll('[data-history-sub]').forEach(btn => {
+  btn.addEventListener('click', () => switchHistorySub(btn.dataset.historySub, btn));
+});
+
+document.getElementById('feedback-open-btn').addEventListener('click', () => {
+  document.getElementById('feedback-modal').classList.add('open');
+});
+
+document.getElementById('feedback-close-btn').addEventListener('click', () => {
+  document.getElementById('feedback-modal').classList.remove('open');
+});
+
+document.getElementById('feedback-form').addEventListener('submit', submitFeedback);
 
 // Feedback form
 async function submitFeedback(e) {

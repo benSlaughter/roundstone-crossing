@@ -2,7 +2,7 @@
 
 import pytest
 from fastapi.testclient import TestClient
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 from src.api import create_app
 from src.models import TrackedTrain, Direction, TrainPhase
@@ -305,3 +305,84 @@ def test_sf_summary_with_data(history_db, tracker, inferrer):
     assert addr_map["2F"]["change_count"] == 1
     assert "first_seen" in addr_map["16"]
     assert "last_seen" in addr_map["16"]
+
+
+# ── Feedback endpoints ───────────────────────────────────────────────
+
+class TestFeedbackPost:
+
+    def test_valid_message(self, tracker, inferrer, history_db):
+        app = create_app(tracker, inferrer, history_db)
+        client = TestClient(app)
+        resp = client.post("/feedback", json={"message": "Great app!"})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["ok"] is True
+        assert "id" in data
+
+    def test_empty_message_rejected(self, tracker, inferrer, history_db):
+        app = create_app(tracker, inferrer, history_db)
+        client = TestClient(app)
+        resp = client.post("/feedback", json={"message": ""})
+        assert resp.status_code == 422
+
+    def test_message_too_long_rejected(self, tracker, inferrer, history_db):
+        app = create_app(tracker, inferrer, history_db)
+        client = TestClient(app)
+        resp = client.post("/feedback", json={"message": "x" * 2001})
+        assert resp.status_code == 422
+
+    def test_missing_message_field(self, tracker, inferrer, history_db):
+        app = create_app(tracker, inferrer, history_db)
+        client = TestClient(app)
+        resp = client.post("/feedback", json={})
+        assert resp.status_code == 422
+
+
+class TestFeedbackGet:
+
+    def test_no_token_returns_401(self, tracker, inferrer, history_db):
+        with patch.dict("os.environ", {"ADMIN_TOKEN": "secret123"}):
+            app = create_app(tracker, inferrer, history_db)
+        client = TestClient(app)
+        resp = client.get("/feedback")
+        assert resp.status_code == 401
+
+    def test_wrong_token_returns_401(self, tracker, inferrer, history_db):
+        with patch.dict("os.environ", {"ADMIN_TOKEN": "secret123"}):
+            app = create_app(tracker, inferrer, history_db)
+        client = TestClient(app)
+        resp = client.get("/feedback", headers={"Authorization": "Bearer wrong"})
+        assert resp.status_code == 401
+
+    def test_correct_token_returns_200(self, tracker, inferrer, history_db):
+        with patch.dict("os.environ", {"ADMIN_TOKEN": "secret123"}):
+            app = create_app(tracker, inferrer, history_db)
+        client = TestClient(app)
+        resp = client.get("/feedback", headers={"Authorization": "Bearer secret123"})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "feedback" in data
+        assert isinstance(data["feedback"], list)
+
+    def test_correct_token_returns_submitted_feedback(self, tracker, inferrer, history_db):
+        with patch.dict("os.environ", {"ADMIN_TOKEN": "mytoken"}):
+            app = create_app(tracker, inferrer, history_db)
+        client = TestClient(app)
+
+        # Submit feedback first
+        client.post("/feedback", json={"message": "Test feedback"})
+
+        # Retrieve it
+        resp = client.get("/feedback", headers={"Authorization": "Bearer mytoken"})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data["feedback"]) >= 1
+        assert any(f["message"] == "Test feedback" for f in data["feedback"])
+
+    def test_no_admin_token_configured_returns_503(self, tracker, inferrer, history_db):
+        with patch.dict("os.environ", {"ADMIN_TOKEN": ""}, clear=False):
+            app = create_app(tracker, inferrer, history_db)
+        client = TestClient(app)
+        resp = client.get("/feedback", headers={"Authorization": "Bearer anything"})
+        assert resp.status_code == 503

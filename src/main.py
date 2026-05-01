@@ -24,6 +24,50 @@ def load_config() -> dict:
         return yaml.safe_load(f)
 
 
+def validate_config(config: dict) -> None:
+    """Validate that required config keys exist and have sensible values.
+
+    Raises SystemExit with a clear message on validation failure.
+    """
+    errors: list[str] = []
+
+    # crossing.name
+    if not config.get("crossing", {}).get("name"):
+        errors.append("crossing.name is required")
+
+    # td.area_id
+    if not config.get("td", {}).get("area_id"):
+        errors.append("td.area_id is required")
+
+    # railway.stations.west/east with crs codes
+    stations = config.get("railway", {}).get("stations", {})
+    for side in ("west", "east"):
+        station = stations.get(side, {})
+        if not station:
+            errors.append(f"railway.stations.{side} is required")
+        elif not station.get("crs"):
+            errors.append(f"railway.stations.{side}.crs is required")
+
+    # timing values must exist and be positive numbers
+    timing = config.get("timing", {})
+    for key in ("pre_closure_secs", "crossing_clearance_secs", "post_clearance_secs"):
+        val = timing.get(key)
+        if val is None:
+            errors.append(f"timing.{key} is required")
+        elif not isinstance(val, (int, float)) or val <= 0:
+            errors.append(f"timing.{key} must be a positive number, got {val!r}")
+
+    # api.port must exist and be a valid port number
+    port = config.get("api", {}).get("port")
+    if port is None:
+        errors.append("api.port is required")
+    elif not isinstance(port, int) or not (1 <= port <= 65535):
+        errors.append(f"api.port must be an integer between 1 and 65535, got {port!r}")
+
+    if errors:
+        raise SystemExit("Config validation failed:\n  - " + "\n  - ".join(errors))
+
+
 def run_predictor(config: dict, with_api: bool = False):
     """Main loop: connect to feeds, track trains, infer state, log history."""
     from .tracker import TrainTracker
@@ -31,6 +75,7 @@ def run_predictor(config: dict, with_api: bool = False):
     from .history import HistoryLogger
     from .feed import NRODFeed
     from .rtt import RTTClient
+    from .models import TrainPhase
 
     tracker = TrainTracker(config)
     inferrer = CrossingInferrer(config)
@@ -93,12 +138,12 @@ def run_predictor(config: dict, with_api: bool = False):
                     f" ({status.confidence:.0%}){train_str}{eta_str}"
                 )
 
-            # Log completed train passages
-            for train in list(tracker.trains.values()):
-                from .models import TrainPhase
-                if train.phase == TrainPhase.CLEARED and not getattr(train, '_passage_logged', False):
-                    history.log_train_passage(train)
-                    train._passage_logged = True
+            # Log completed train passages (take lock for thread safety)
+            with tracker._lock:
+                for train in list(tracker.trains.values()):
+                    if train.phase == TrainPhase.CLEARED and not train._passage_logged:
+                        history.log_train_passage(train)
+                        train._passage_logged = True
 
             sleep(2)  # Check every 2 seconds
 
@@ -172,6 +217,7 @@ def main():
         logging.getLogger(noisy).setLevel(logging.WARNING)
 
     config = load_config()
+    validate_config(config)
     run_predictor(config, with_api=args.api)
 
 

@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Roundstone Crossing</title>
-  <link rel="stylesheet" href="/static/style.css?v=3">
+  <link rel="stylesheet" href="/static/style.css?v=4">
 </head>
 <body>
   <h1>Roundstone Crossing</h1>
@@ -23,17 +23,17 @@
   </div>
 
   <div class="tab-bar" id="tab-bar">
-    <button class="active" onclick="switchTab('map', this)">Map</button>
-    <button onclick="switchTab('predictions', this)">Predictions</button>
-    <button onclick="switchTab('upcoming', this)">Upcoming</button>
-    <button onclick="switchTab('history', this)">History</button>
-    <button onclick="switchTab('info', this)">Info</button>
+    <button class="active" data-tab="map">Map</button>
+    <button data-tab="predictions">Predictions</button>
+    <button data-tab="upcoming">Upcoming</button>
+    <button data-tab="history">History</button>
+    <button data-tab="info">Info</button>
   </div>
 
   <div class="schematic">
     <div class="tab-content" id="tab-map">
     <div class="schematic-title">Track Diagram
-      <button class="berth-toggle" onclick="document.getElementById('track-area').classList.toggle('show-berths')">Berths</button>
+      <button class="berth-toggle" id="berth-toggle-btn">Berths</button>
     </div>
     <div class="track-area" id="track-area">
       <!-- Track lines (full width) -->
@@ -68,8 +68,8 @@
 
     <div class="upcoming-panel" id="tab-upcoming" style="display:none">
       <div class="sub-tabs">
-        <button class="sub-tab active" onclick="switchUpcomingStation('ANG', this)">Angmering</button>
-        <button class="sub-tab" onclick="switchUpcomingStation('GBS', this)">Goring-by-Sea</button>
+        <button class="sub-tab active" data-station="ANG">Angmering</button>
+        <button class="sub-tab" data-station="GBS">Goring-by-Sea</button>
       </div>
       <table class="upcoming-table">
         <thead>
@@ -113,8 +113,8 @@
 
     <div id="tab-history" style="display:none">
       <div class="sub-tabs">
-        <button class="sub-tab active" onclick="switchHistorySub('crossing', this)">Crossing</button>
-        <button class="sub-tab" onclick="switchHistorySub('trains', this)">Trains</button>
+        <button class="sub-tab active" data-history-sub="crossing">Crossing</button>
+        <button class="sub-tab" data-history-sub="trains">Trains</button>
       </div>
       <div id="history-sub-crossing">
         <div id="history-list"><div class="empty">Loading…</div></div>
@@ -133,16 +133,16 @@
   <footer>
     <span class="pulse" id="pulse"></span><span id="footer-text">Connecting…</span>
     <span class="footer-sep">·</span>
-    <button class="feedback-btn" onclick="document.getElementById('feedback-modal').classList.add('open')">Feedback</button>
+    <button class="feedback-btn" id="feedback-open-btn">Feedback</button>
   </footer>
 
   <div class="modal-overlay" id="feedback-modal">
     <div class="modal">
       <div class="modal-header">
         <span>Send Feedback</span>
-        <button class="modal-close" onclick="document.getElementById('feedback-modal').classList.remove('open')">&times;</button>
+        <button class="modal-close" id="feedback-close-btn">&times;</button>
       </div>
-      <form id="feedback-form" onsubmit="submitFeedback(event)">
+      <form id="feedback-form">
         <textarea id="feedback-msg" placeholder="Bug report, suggestion, or just say hi…" rows="4" maxlength="2000" required></textarea>
         <div class="modal-footer">
           <span id="feedback-status"></span>
@@ -152,6 +152,6 @@
     </div>
   </div>
 
-  <script src="/static/app.js?v=3"></script>
+  <script src="/static/app.js?v=4"></script>
 </body>
 </html>

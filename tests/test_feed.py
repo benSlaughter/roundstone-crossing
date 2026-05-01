@@ -1,5 +1,6 @@
 """Tests for NRODListener message parsing and dispatch."""
 
+import json
 from datetime import datetime, timezone
 from unittest.mock import MagicMock
 
@@ -219,3 +220,159 @@ class TestHandleSfMessages:
         ]
         listener_with_history._handle_td(messages)
         mock_history.record_sf_event.assert_not_called()
+
+
+# ── on_message ───────────────────────────────────────────────────────
+
+class TestOnMessage:
+
+    def test_gzip_td_message(self, listener, mock_tracker):
+        import gzip as gz
+        td_payload = json.dumps([{"CA_MSG": {
+            "area_id": "LA", "from": "A001", "to": "A002",
+            "descr": "1A23", "time": "1030",
+        }}])
+        compressed = gz.compress(td_payload.encode("utf-8"))
+
+        frame = MagicMock()
+        frame.body = compressed
+        frame.headers = {"destination": "/topic/TD_ALL_SIG_AREA"}
+
+        listener.on_message(frame)
+        mock_tracker.handle_td_step.assert_called_once()
+
+    def test_plain_json_td_message(self, listener, mock_tracker):
+        td_payload = json.dumps([{"CA_MSG": {
+            "area_id": "LA", "from": "A001", "to": "A002",
+            "descr": "1A23", "time": "1030",
+        }}])
+
+        frame = MagicMock()
+        frame.body = td_payload
+        frame.headers = {"destination": "/topic/TD_ALL_SIG_AREA"}
+
+        listener.on_message(frame)
+        mock_tracker.handle_td_step.assert_called_once()
+
+    def test_plain_bytes_non_gzip(self, listener, mock_tracker):
+        """Non-gzip bytes fall back to utf-8 decode."""
+        td_payload = json.dumps([{"CA_MSG": {
+            "area_id": "LA", "from": "A001", "to": "A002",
+            "descr": "1A23", "time": "1030",
+        }}])
+
+        frame = MagicMock()
+        frame.body = td_payload.encode("utf-8")  # bytes but not gzipped
+        frame.headers = {"destination": "/topic/TD_ALL_SIG_AREA"}
+
+        listener.on_message(frame)
+        mock_tracker.handle_td_step.assert_called_once()
+
+    def test_bad_gzip_data_logged_no_crash(self, listener, mock_tracker):
+        frame = MagicMock()
+        frame.body = b"\x1f\x8b\x00invalid"  # looks like gzip header but corrupt
+        frame.headers = {"destination": "/topic/TD_ALL_SIG_AREA"}
+
+        # Should not raise — error is caught and logged
+        listener.on_message(frame)
+        mock_tracker.handle_td_step.assert_not_called()
+
+    def test_bad_json_logged_no_crash(self, listener, mock_tracker):
+        frame = MagicMock()
+        frame.body = "not valid json {{"
+        frame.headers = {"destination": "/topic/TD_ALL_SIG_AREA"}
+
+        listener.on_message(frame)
+        mock_tracker.handle_td_step.assert_not_called()
+
+    def test_td_destination_routes_to_handle_td(self, listener, mock_tracker):
+        frame = MagicMock()
+        frame.body = json.dumps([{"CA_MSG": {
+            "area_id": "LA", "from": "A001", "to": "A002",
+            "descr": "1A23", "time": "1030",
+        }}])
+        frame.headers = {"destination": "/topic/TD_ALL_SIG_AREA"}
+
+        listener.on_message(frame)
+        mock_tracker.handle_td_step.assert_called_once()
+        mock_tracker.handle_trust_movement.assert_not_called()
+
+    def test_trust_destination_routes_to_handle_trust(self, listener, mock_tracker):
+        frame = MagicMock()
+        frame.body = json.dumps([{"header": {}, "body": {
+            "msg_type": "0003", "train_id": "512E281Y27",
+            "loc_stanox": "87998", "planned_event_type": "DEPARTURE",
+            "actual_timestamp": "1718444400000",
+        }}])
+        frame.headers = {"destination": "/topic/TRAIN_MVT_ALL_TOC"}
+
+        listener.on_message(frame)
+        mock_tracker.handle_trust_movement.assert_called_once()
+        mock_tracker.handle_td_step.assert_not_called()
+
+    def test_on_message_callback_called(self, mock_tracker):
+        callback = MagicMock()
+        listener = NRODListener(mock_tracker, on_message_callback=callback)
+
+        frame = MagicMock()
+        frame.body = json.dumps([])
+        frame.headers = {"destination": "/topic/TD_ALL_SIG_AREA"}
+
+        listener.on_message(frame)
+        callback.assert_called_once()
+
+    def test_last_message_time_updated(self, listener):
+        frame = MagicMock()
+        frame.body = json.dumps([])
+        frame.headers = {"destination": "/topic/OTHER"}
+
+        assert listener.last_message_time is None
+        listener.on_message(frame)
+        assert listener.last_message_time is not None
+
+
+# ── on_connected / on_disconnected ───────────────────────────────────
+
+class TestConnectionCallbacks:
+
+    def test_on_connected_sets_state(self, listener):
+        frame = MagicMock()
+        assert listener.connected is False
+
+        listener.on_connected(frame)
+
+        assert listener.connected is True
+        assert listener.last_message_time is not None
+
+    def test_on_connected_calls_message_callback(self, mock_tracker):
+        callback = MagicMock()
+        listener = NRODListener(mock_tracker, on_message_callback=callback)
+
+        listener.on_connected(MagicMock())
+        callback.assert_called_once()
+
+    def test_on_disconnected_clears_state(self, listener):
+        listener.connected = True
+
+        listener.on_disconnected()
+
+        assert listener.connected is False
+
+    def test_on_disconnected_calls_disconnect_callback(self, mock_tracker):
+        disconnect_cb = MagicMock()
+        listener = NRODListener(mock_tracker, on_disconnect_callback=disconnect_cb)
+        listener.connected = True
+
+        listener.on_disconnected()
+
+        disconnect_cb.assert_called_once()
+        assert listener.connected is False
+
+    def test_on_disconnected_no_callback_no_crash(self, listener):
+        listener.connected = True
+        listener.on_disconnected()  # should not raise
+
+    def test_on_error_no_crash(self, listener):
+        frame = MagicMock()
+        frame.body = "some error"
+        listener.on_error(frame)  # should not raise

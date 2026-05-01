@@ -2,10 +2,11 @@
 Crossing state model — defines the possible inferred states and the per-train tracking objects.
 """
 
+from __future__ import annotations
+
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Optional
 
 
 class CrossingState(str, Enum):
@@ -36,17 +37,18 @@ class TrainPhase(str, Enum):
 class TrackedTrain:
     """A train being tracked as it approaches/passes the crossing."""
     headcode: str                          # e.g., "1A23"
-    train_id: Optional[str] = None         # TRUST train UID if correlated
-    direction: Optional[Direction] = None
+    train_id: str | None = None         # TRUST train UID if correlated
+    direction: Direction | None = None
     phase: TrainPhase = TrainPhase.APPROACHING
-    last_berth: Optional[str] = None
-    last_berth_time: Optional[datetime] = None
+    last_berth: str | None = None
+    last_berth_time: datetime | None = None
     first_seen: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     last_update: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
-    predicted_at_crossing: Optional[datetime] = None
+    predicted_at_crossing: datetime | None = None
     confidence: float = 0.5                # 0.0 = guess, 1.0 = certain
-    station: Optional[str] = None          # Station name if AT_STATION
-    sub_position: Optional[str] = None     # "entry" or "at_platform" within station berths
+    station: str | None = None          # Station name if AT_STATION
+    sub_position: str | None = None     # "entry" or "at_platform" within station berths
+    _passage_logged: bool = False          # Whether this train's passage has been logged
 
     @property
     def age_secs(self) -> float:
@@ -63,12 +65,12 @@ class CrossingStatus:
     state: CrossingState = CrossingState.UNKNOWN
     confidence: float = 0.0
     since: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
-    predicted_change: Optional[datetime] = None
-    predicted_next_state: Optional[CrossingState] = None
+    predicted_change: datetime | None = None
+    predicted_next_state: CrossingState | None = None
     active_trains: list[TrackedTrain] = field(default_factory=list)
-    last_feed_message: Optional[datetime] = None
+    last_feed_message: datetime | None = None
 
-    def seconds_until_change(self) -> Optional[float]:
+    def seconds_until_change(self) -> float | None:
         if self.predicted_change:
             delta = (self.predicted_change - datetime.now(timezone.utc)).total_seconds()
             return max(0, delta)

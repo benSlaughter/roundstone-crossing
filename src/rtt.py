@@ -3,12 +3,14 @@ Realtime Trains (RTT) API client — polls station data for platform-level train
 Supplements TD/TRUST with definitive AT_PLATFORM confirmation.
 """
 
+from __future__ import annotations
+
 import logging
 import os
 import threading
 import time
+from collections.abc import Callable
 from datetime import datetime, timezone, timedelta
-from typing import Optional, Callable
 
 import requests
 
@@ -30,15 +32,15 @@ class RTTClient:
         self.poll_interval = poll_interval
 
         self._refresh_token = os.environ.get("RTT_TOKEN", "")
-        self._access_token: Optional[str] = None
-        self._token_expires: Optional[datetime] = None
+        self._access_token: str | None = None
+        self._token_expires: datetime | None = None
 
         # Rate limit backoff — shared across all requests
-        self._retry_after: Optional[datetime] = None
+        self._retry_after: datetime | None = None
 
-        self._thread: Optional[threading.Thread] = None
+        self._thread: threading.Thread | None = None
         self._running = False
-        self._on_update: Optional[Callable] = None
+        self._on_update: Callable | None = None
         self._has_active_trains: Callable = lambda: False  # gate for polling
 
         if not self._refresh_token:
