@@ -41,19 +41,33 @@ python -m src.main --api    # Start with API server
 ### Web Dashboard
 Open http://localhost:8590 in your browser for a live dashboard with:
 - Schematic track diagram with train positions
+- Predictions tab with upcoming closure windows
 - Upcoming trains panel (from Realtime Trains)
 - Crossing state history
+- Feedback form in the footer
+
+### Docker Deployment
+```bash
+# On your server:
+./update.sh              # Pull image and start container
+docker compose logs -f   # View logs
+```
+
+The app is deployed via GitHub Actions — every push to `main` builds a Docker image and pushes to GHCR.
 
 ### API
 ```
-GET /              — Web dashboard
-GET /status        — Current crossing state + confidence
-GET /diagram       — Tracked trains with berth positions (for schematic)
-GET /predictions   — Upcoming trains + predicted closure windows
-GET /next?station= — Upcoming services at a station (ANG or GBS)
-GET /history       — Query historical open/close intervals
-GET /stats         — Summary statistics
-GET /health        — System health (uptime, feed status, DB size)
+GET /                      — Web dashboard
+GET /status                — Current crossing state + confidence
+GET /diagram               — Tracked trains with berth positions (for schematic)
+GET /predictions           — Upcoming trains + predicted closure windows
+GET /predictions/windows   — Upcoming closure windows from RTT data
+GET /next?station=         — Upcoming services at a station (ANG or GBS)
+GET /history               — Query historical open/close intervals
+GET /stats                 — Summary statistics
+GET /health                — System health (uptime, feed status, DB size)
+POST /feedback             — Submit feedback (JSON: {"message": "..."})
+GET /feedback              — Retrieve feedback (requires Authorization: Bearer <token>)
 ```
 
 ## Architecture

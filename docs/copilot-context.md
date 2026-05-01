@@ -62,7 +62,7 @@ NROD STOMP Feeds (TD + TRUST + SF)
 
 ### ✅ What's Done
 - Full prediction pipeline: feed → tracker → inferrer → API → web dashboard
-- 158 automated tests, all passing (~2s)
+- 165 automated tests, all passing (~2s)
 - S-Class signalling message logging (SF/SG/SH/CT) for future barrier state correlation
 - RTT integration for station-level train enrichment
 - Web dashboard with CSS/JS extracted to separate files (`static/style.css`, `static/app.js`)
@@ -72,6 +72,11 @@ NROD STOMP Feeds (TD + TRUST + SF)
 - ESP32-C3 barrier logger: firmware, documentation, schematics, BOM (~£21)
 - GitHub repo: public at `benSlaughter/roundstone-crossing`
 - Security audited, `.gitignore` cleaned, `.env.example` with placeholders
+- Predictions tab — upcoming crossing closure windows derived from RTT station data, with proximity-coloured cards and auto-refresh
+- Docker deployment — multi-stage Dockerfile, docker-compose.yml, CI/CD via GitHub Actions (build + push to GHCR)
+- Production deployment — running on server at `crossing.benslaughter.com` with nginx reverse proxy + SSL
+- Feedback form — modal in site footer, stored to SQLite, admin-protected GET endpoint (Bearer token via ADMIN_TOKEN env var)
+- UTC/BST timezone handling — RTT times correctly tagged as Europe/London before UTC conversion
 
 ### 🔲 Remaining Work
 1. **SF correlation** (blocked) — Attempted to identify which SF address+bit = barrier state. Area LA data (8 addresses) does not correlate with observed closures. The barrier control may be on a different signalling area or not published via NROD. Needs further research or broader SF capture.
@@ -87,7 +92,7 @@ NROD STOMP Feeds (TD + TRUST + SF)
 | `src/models.py` | CrossingState, TrackedTrain, CrossingStatus dataclasses |
 | `src/tracker.py` | Per-train tracking from TD + TRUST + RTT, stale cleanup |
 | `src/inferrer.py` | Derives crossing state, no-bounce logic, window merging |
-| `src/history.py` | SQLite logger (state_intervals, train_passages, train_events, sf_events) |
+| `src/history.py` | SQLite logger (state_intervals, train_passages, train_events, sf_events, feedback) |
 | `src/feed.py` | NROD STOMP connection, TD/TRUST/SF message handling, auto-reconnect |
 | `src/rtt.py` | Realtime Trains API client for station platform status |
 | `src/api.py` | FastAPI endpoints + static file serving |
@@ -96,10 +101,14 @@ NROD STOMP Feeds (TD + TRUST + SF)
 | `static/index.html` | Web dashboard HTML |
 | `static/style.css` | Dashboard styles |
 | `static/app.js` | Dashboard JavaScript |
-| `tests/` | 158 tests across inferrer, tracker, feed, API, history |
+| `tests/` | 165 tests across inferrer, tracker, feed, API, history |
 | `device/` | ESP32-C3 barrier logger (firmware, docs, schematics) |
 | `data/observations/` | Manual crossing observations with accuracy notes |
 | `docs/research.md` | Full research on data sources, APIs, crossing details |
+| `Dockerfile` | Multi-stage Python 3.12 build (test → production) |
+| `docker-compose.yml` | Container config with persistent volumes, env_file |
+| `.github/workflows/build.yml` | CI: tests on PR, Docker build+push to GHCR on main |
+| `update.sh` | One-command server deploy script |
 
 ## How to Run
 
@@ -107,15 +116,18 @@ NROD STOMP Feeds (TD + TRUST + SF)
 cd ~/projects/roundstone-crossing
 source .venv/bin/activate
 python -m src.main --api --debug   # predictor + API on 127.0.0.1:8590
-python -m pytest tests/ -v         # run test suite (158 tests, ~2s)
+python -m pytest tests/ -v         # run test suite (165 tests, ~2s)
 ```
 
 The server writes its PID to `server.pid` (gitignored).
 
 ### Environment
 - Python 3.12 venv at `.venv/`
-- macOS (Darwin)
-- Credentials in `.env` (gitignored): NROD_USERNAME, NROD_PASSWORD, RTT_USERNAME, RTT_PASSWORD
+- macOS (Darwin) for development
+- Production: Docker on Azure server, nginx reverse proxy, SSL via certbot
+- Live at: `crossing.benslaughter.com`
+- Credentials in `.env` (gitignored): NROD_USERNAME, NROD_PASSWORD, RTT_TOKEN, ADMIN_TOKEN
+- Separate NROD accounts for dev and prod (NROD allows only 1 concurrent STOMP connection per account)
 
 ## Technical Reference
 
