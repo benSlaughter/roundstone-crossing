@@ -79,8 +79,8 @@ Build a system to monitor the Roundstone Level Crossing in Angmering, integrate 
 **a) Train Describer (TD) Feed** ⭐ Most relevant
 - Shows train headcodes stepping through berths (track sections)
 - Real-time, second-by-second train position data
-- Sussex Coastway TD prefix: likely "ES" (e.g., ES613, ES615, ES931)
-- Topic: `/topic/TD_ALL_SIG_AREA` or specific area topics
+- Sussex Coastway TD area: **LA** (confirmed from SMART data)
+- Topic: `/topic/TD_ALL_SIG_AREA`
 - **Key insight**: By monitoring which TD berth a train is in, and knowing the "strike-in" berth (the point where barrier closure is triggered), you can predict when barriers will close
 
 **b) Train Movements (TRUST) Feed**
@@ -133,7 +133,7 @@ class Listener(stomp.ConnectionListener):
         data = json.loads(body.decode('utf-8'))
         # Filter for Angmering area TD berths
         for msg in data:
-            if msg.get('area_id') == 'ES':  # Sussex area
+            if msg.get('area_id') == 'LA':  # Angmering area
                 print(msg)
 
 conn = stomp.Connection([('publicdatafeeds.networkrail.co.uk', 61618)])
@@ -301,9 +301,12 @@ None of the existing integrations handle **level crossing prediction**. This wou
 | Ford | FOD | FORD | — | Junction for Arun Valley line |
 
 ### TD Berth Area
-- Sussex Coastway TD prefix: **ES** (likely)
-- Specific berth IDs near crossing: need to identify from OpenTrainTimes maps
-- Example signal IDs near Angmering: ES613, ES615, ES931 (to be confirmed)
+- Sussex Coastway TD area: **LA** (confirmed from SMART data — not ES as initially assumed)
+- Berths near crossing:
+  - **Goring side (eastbound approach)**: 0032, 0033, 0034, 0035
+  - **Crossing zone**: 0036, 0037
+  - **Angmering side (westbound approach)**: 0038, 0039, 0040, 0041
+- S-class signalling: 8 addresses seen in area LA (03, 04, 06, 07, 0A, 0B, 0D, 0E)
 
 ---
 
@@ -361,13 +364,14 @@ Python Service (roundstone-crossing)
 
 ## 📋 Next Steps
 
-1. **Register for NROD access** — https://publicdatafeeds.networkrail.co.uk (limited spots)
-2. **Register for Darwin API token** — https://realtime.nationalrail.co.uk/OpenLDBWSRegistration/
-3. **Identify exact TD berths** — Use OpenTrainTimes maps to find berths near Roundstone crossing
-4. **Build Python STOMP bridge** — Subscribe to TD feed, filter for Angmering berths, publish to MQTT
-5. **Create HA sensors** — MQTT binary_sensor + template sensors
-6. **Test predictions** — Compare predicted vs actual closure times
-7. **Add notifications** — Phone, Jarvis voice, MagicMirror
+1. ~~Register for NROD access~~ ✅ Done
+2. ~~Identify exact TD berths~~ ✅ Done (area LA, berths 0032-0041)
+3. ~~Build Python service~~ ✅ Done — live tracker + inferrer + API + web dashboard
+4. ~~Test predictions~~ ✅ Calibrated from 4 days of manual observations
+5. **Identify SF barrier bit** — Area LA S-class data didn't correlate; may need broader capture
+6. **Build ESP32 device** — Parts list and firmware ready, needs assembly for continuous logging
+7. **CIF schedule integration** — Advance prediction before trains appear on TD
+8. **Home Assistant** — MQTT sensors, notifications, Jarvis voice, MagicMirror widget
 
 ### Registration Links
 - Network Rail Open Data: https://publicdatafeeds.networkrail.co.uk

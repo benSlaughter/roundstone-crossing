@@ -1,43 +1,34 @@
 # TODO — Roundstone Crossing Predictor
 
-## 🔴 Before First Run (blockers)
+## ✅ Completed
 
-- [x] **Register for NROD access** — https://publicdatafeeds.networkrail.co.uk
-  - Create account, get username/password
-  - Add credentials to `.env` (copy from `.env.example`)
-  - Note: limited to 1,000 users, first-come-first-served
+- [x] **Register for NROD access** — Connected and receiving live TD + TRUST + SF data
+- [x] **Map TD berths near Roundstone crossing** — Area LA confirmed, berths 0032-0041 mapped for both directions
+- [x] **Download SMART data** — SMART and CORPUS data used for berth-to-location mapping
+- [x] **Calibrate timing model** — Calibrated from 4 days of manual observations (Apr 28-May 1): pre_closure=120s, crossing_clearance=10s, post_clearance=5s
+- [x] **Validate predictions** — Observed multiple crossing events, identified and fixed state bouncing, stale train, and false open issues
+- [x] **Automated tests** — 158 tests covering inferrer, tracker, feed, API, and history
+- [x] **Opening prediction** — Multi-train closure window merging with accurate opening predictions
+- [x] **Web dashboard** — Tab-based UI with CSS/JS extracted to separate files
+- [x] **Code audit remediation** — Thread safety, feed reconnect, CB_MSG handling, XSS fixes
+- [x] **GitHub repo** — Public at `benSlaughter/roundstone-crossing`
+- [x] **Security audit** — Credentials, PII, .gitignore cleaned
+- [x] **RTT integration** — Platform-level train enrichment at Angmering and Goring-by-Sea
+- [x] **S-Class message logging** — SF/SG/SH/CT messages recorded to SQLite for analysis
+- [x] **ESP32 barrier logger** — Firmware, docs, schematics, and BOM ready
 
-- [x] **Map TD berths near Roundstone crossing**
-  - TD area is **LA** (not ES as initially assumed) — confirmed from SMART data
-  - Berths mapped: 0032-0035 (Goring), 0036-0037 (crossing zone), 0038-0041 (Angmering)
-  - Populated `config.yaml` berth zone arrays for both directions
-  - Scripts: `scripts/download_reference_data.py`, `scripts/find_berths.py`
+## 🔲 Next Up
 
-- [x] **Download SMART data** from NROD portal
-  - SMART and CORPUS data downloaded to `data/` directory
-  - Used to confirm berth-to-location mapping near the crossing
-
-## 🟡 Early Improvements (once running)
-
-- [ ] **Calibrate timing model** — the initial heuristic is 120s pre-closure, 15s post-clearance, based on MCB-CCTV standards. Real Roundstone timings may differ. Use historical logged data to find actual averages per direction/service pattern and update `config.yaml`.
-
-- [ ] **TRUST STANOX mapping** — current config uses TIPLOC for TRUST timing points, but TRUST movements use STANOX. Verify the STANOX values (87997 for Goring, 87998 for Angmering) match what the feed sends. May need to use CORPUS data to cross-reference.
-
-- [ ] **Handle freight trains** — freight may not appear on Darwin/schedules. TD will still show them as headcodes. Ensure the tracker handles unknown headcodes gracefully (it should — just lower confidence).
-
-- [ ] **Validate predictions** — manually observe the crossing a few times and compare predicted vs actual barrier times. Adjust timing model based on findings.
-
-- [ ] **Add schedule context** — download daily CIF schedule to know what trains to expect. This lets us predict closures even before the train appears on TD. Not essential for v1 but improves the "what's coming in the next hour" view.
+- [ ] **SF barrier bit identification** — Area LA SF data (8 addresses) didn't correlate with observed closures. May need to capture ALL areas, or the barrier state may not be published via NROD. Revisit with more data or broader capture.
+- [ ] **Build ESP32 device** — Parts list ready (~£21 BOM), firmware written. Order parts and assemble for continuous ground-truth logging.
+- [ ] **Handle freight trains** — Freight may not appear in schedules. TD shows them as headcodes. Tracker handles unknown headcodes but confidence could be improved.
+- [ ] **Add schedule context (CIF)** — Download daily CIF schedule to predict closures before trains appear on TD. Improves the "next hour" view.
 
 ## 🟢 Future Enhancements
 
-- [ ] **Home Assistant integration** — publish state to MQTT, create HA sensors, notifications, Jarvis voice announcements, MagicMirror widget
-- [x] **Web dashboard** — simple HTML page showing live crossing status, countdown, next trains
-- [x] **Direction arrows** — show train direction in upcoming panel
-- [x] **Train event logging** — log berth steps for calibration
-- [x] **Code audit remediation** — thread safety, feed reconnect, CB_MSG handling, XSS fixes, docs update
-- [ ] **Historical analytics** — average closure duration by hour/day, busiest times, longest closures
-- [ ] **Push notifications** — "crossing closing in 2 minutes" via HA, Telegram, or similar
-- [ ] **Multi-crossing support** — the architecture is generic enough to support other local crossings (Angmering Station Road crossing, etc.) — just add berth zones to config
-- [ ] **Empirical timing auto-calibration** — automatically adjust timing model from observed data (compare predicted vs actual state change times)
-- [ ] **GitHub repo** — push to `benSlaughter/roundstone-crossing` once stable
+- [ ] **Home Assistant integration** — Publish state to MQTT, create HA sensors, notifications, Jarvis voice announcements
+- [ ] **Observation upload endpoint** — API to accept CSVs from ESP32 device or phone shortcuts for automated comparison
+- [ ] **Historical analytics** — Average closure duration by hour/day, busiest times, longest closures
+- [ ] **Push notifications** — "Crossing closing in 2 minutes" via HA, Telegram, or similar
+- [ ] **Empirical timing auto-calibration** — Automatically adjust timing model from device-logged vs predicted state changes
+- [ ] **Multi-crossing support** — Architecture supports other local crossings (e.g. Angmering Station Road) — just add berth zones to config
