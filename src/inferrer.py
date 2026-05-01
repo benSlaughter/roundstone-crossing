@@ -6,6 +6,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 
 from .models import CrossingState, CrossingStatus, TrainPhase, TrackedTrain
+from .utils import merge_closure_windows
 
 logger = logging.getLogger("crossing.inferrer")
 
@@ -135,36 +136,35 @@ class CrossingInferrer:
         post_clearance = self._timing.get("post_clearance_secs", 15)
         pre_closure = self._timing.get("pre_closure_secs", 120)
 
-        # Build closure windows: (start, end) for each non-cleared train
-        windows: list[tuple[datetime, datetime]] = []
+        # Build prediction dicts for non-cleared trains
+        predictions: list[dict] = []
         for t in trains:
             if t.phase in (TrainPhase.CLEARED, TrainPhase.LOST):
                 continue
             eta = self._estimate_clear_time(t, now, crossing_clear)
             if eta is None:
                 continue
-            # Window starts when barriers would lower for this train
-            window_start = max(eta - timedelta(seconds=crossing_clear + pre_closure), now)
-            window_end = max(eta + timedelta(seconds=post_clearance), now)
-            windows.append((window_start, window_end))
+            # Clamp to 'now' so windows don't extend into the past
+            clamped_eta = max(eta, now)
+            predictions.append({"crossing_eta": clamped_eta})
 
-        if not windows:
+        if not predictions:
             return now + timedelta(seconds=crossing_clear + post_clearance)
 
-        # Merge overlapping windows, find the one containing 'now'
-        windows.sort()
-        merged: list[tuple[datetime, datetime]] = [windows[0]]
-        for start, end in windows[1:]:
-            if start <= merged[-1][1]:
-                merged[-1] = (merged[-1][0], max(merged[-1][1], end))
-            else:
-                merged.append((start, end))
+        # Use pre_closure + crossing_clear as the effective pre-closure
+        # because _estimate_clear_time already adds crossing_clear to the ETA
+        merged = merge_closure_windows(
+            predictions,
+            pre_closure_secs=crossing_clear + pre_closure,
+            crossing_clearance_secs=0,
+            post_clearance_secs=post_clearance,
+        )
 
-        # Return the end of the current (or first) merged block
-        for start, end in merged:
-            if start <= now <= end:
-                return end
-        return merged[0][1]
+        # Return the end of the window containing 'now', or the first window
+        for w in merged:
+            if w["close_at"] <= now <= w["open_at"]:
+                return w["open_at"]
+        return merged[0]["open_at"]
 
     def _estimate_clear_time(self, train: TrackedTrain, now: datetime,
                              crossing_clear_secs: float) -> datetime | None:
