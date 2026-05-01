@@ -1,0 +1,5 @@
+timestamp,event,precision,notes
+2026-05-01T08:40:46,closed,second,gate closed (traffic - limited visibility)
+2026-05-01T08:46:22,open,second,gate open
+2026-05-01T08:54:10,closed,second,gate closed
+2026-05-01T08:57:02,open,second,gate open

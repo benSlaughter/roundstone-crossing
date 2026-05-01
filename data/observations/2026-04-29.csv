@@ -1,0 +1,14 @@
+timestamp,event,precision,notes
+2026-04-29T08:36:45,closed,second,arrived at crossing - gate closed
+2026-04-29T08:37:54,train_west,second,train crossing westbound
+2026-04-29T08:38:45,train_east,second,train crossing eastbound
+2026-04-29T08:39:00,opening,second,observed gate opening
+2026-04-29T08:40:37,closing,second,observed gate closing
+2026-04-29T08:42:30,train_east,second,train crossing eastbound
+2026-04-29T08:42:32,train_west,second,train crossing westbound - gate stayed down after
+2026-04-29T08:45:48,train_west,second,third train crossing westbound (gate still down)
+2026-04-29T08:46:03,opening,second,observed gate opening
+2026-04-29T08:49:07,closing,second,observed gate closing
+2026-04-29T08:51:02,train_east,second,train crossing eastbound
+2026-04-29T08:51:16,opening,second,observed gate opening
+2026-04-29T08:53:15,open,second,left crossing - gate open
