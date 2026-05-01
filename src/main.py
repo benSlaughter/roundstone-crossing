@@ -118,7 +118,7 @@ def _start_api(config: dict, tracker, inferrer, history, rtt_client=None):
 
     app = create_app(tracker, inferrer, history, rtt_client=rtt_client)
     api_config = config.get("api", {})
-    host = api_config.get("host", "0.0.0.0")
+    host = os.environ.get("API_HOST", api_config.get("host", "0.0.0.0"))
     port = api_config.get("port", 8590)
     logger.info(f"API on {host}:{port}")
     uvicorn.run(app, host=host, port=port, log_level="warning")

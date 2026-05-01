@@ -4,6 +4,7 @@ Historical logger — stores every crossing state change and train passage in SQ
 
 import sqlite3
 import logging
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -11,7 +12,7 @@ from .models import CrossingState, CrossingStatus, TrackedTrain
 
 logger = logging.getLogger("crossing.history")
 
-DB_PATH = Path(__file__).parent.parent / "crossing.db"
+DB_PATH = Path(os.environ.get("CROSSING_DB_PATH", str(Path(__file__).parent.parent / "crossing.db")))
 
 
 class HistoryLogger:

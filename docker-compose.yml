@@ -1,0 +1,19 @@
+services:
+  roundstone-crossing:
+    image: ghcr.io/benslaughter/roundstone-crossing:latest
+    build: .
+    container_name: roundstone-crossing
+    restart: unless-stopped
+    ports:
+      - "8590:8590"
+    volumes:
+      - crossing-data:/app/data
+      - crossing-logs:/app/logs
+    env_file:
+      - .env
+    environment:
+      - PYTHONUNBUFFERED=1
+
+volumes:
+  crossing-data:
+  crossing-logs:
