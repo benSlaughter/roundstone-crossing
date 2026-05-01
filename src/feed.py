@@ -72,77 +72,73 @@ class NRODListener(stomp.ConnectionListener):
         logger.error(f"STOMP error: {frame.body}")
 
     def _handle_td(self, messages: list):
-        """Process Train Describer messages."""
+        """Process Train Describer messages — dispatches to per-type handlers."""
         for msg in messages:
-            # TD messages come in several types: CA (berth step), CB (berth cancel),
-            # CC (berth interpose), CT (heartbeat)
-            for msg_type in ("CA_MSG", "CB_MSG", "CC_MSG"):
-                if msg_type in msg:
-                    data = msg[msg_type]
-                    area = data.get("area_id", "")
-
-                    # Filter to our area of interest
-                    if area != self.tracker.area_id:
-                        continue
-
-                    if msg_type == "CA_MSG":
-                        # Berth step: train moved from one berth to another
-                        from_berth = data.get("from", "")
-                        to_berth = data.get("to", "")
-                        headcode = data.get("descr", "")
-                        timestamp = self._parse_td_time(data.get("time", ""))
-
-                        if headcode and to_berth:
-                            self.tracker.handle_td_step(from_berth, to_berth, headcode, timestamp)
-
-                    elif msg_type == "CC_MSG":
-                        # Berth interpose: train appeared in a berth (no "from")
-                        to_berth = data.get("to", "")
-                        headcode = data.get("descr", "")
-                        timestamp = self._parse_td_time(data.get("time", ""))
-
-                        if headcode and to_berth:
-                            self.tracker.handle_td_step("", to_berth, headcode, timestamp)
-
-                    elif msg_type == "CB_MSG":
-                        # Berth cancel: train description removed from berth
-                        from_berth = data.get("from", "")
-                        headcode = data.get("descr", "")
-                        timestamp = self._parse_td_time(data.get("time", ""))
-
-                        if headcode and from_berth:
-                            self.tracker.handle_td_cancel(from_berth, headcode, timestamp)
-
-            # S-Class signalling messages
+            if "CA_MSG" in msg:
+                self._handle_ca_msg(msg["CA_MSG"])
+            if "CB_MSG" in msg:
+                self._handle_cb_msg(msg["CB_MSG"])
+            if "CC_MSG" in msg:
+                self._handle_cc_msg(msg["CC_MSG"])
             if "SF_MSG" in msg:
-                data = msg["SF_MSG"]
-                area = data.get("area_id", "")
-                if area == self.tracker.area_id and self.history:
-                    address = data.get("address", "")
-                    sf_data = data.get("data", "")
-                    if address and sf_data:
-                        self.history.record_sf_event(area, address, sf_data)
-
+                self._handle_sf_msg("SF_MSG", msg["SF_MSG"])
             if "SG_MSG" in msg:
-                # Signalling refresh — bulk snapshot of S-class state on connection
-                data = msg["SG_MSG"]
-                area = data.get("area_id", "")
-                if area == self.tracker.area_id and self.history:
-                    address = data.get("address", "")
-                    sf_data = data.get("data", "")
-                    if address and sf_data:
-                        self.history.record_sf_event(area, address, sf_data)
-                    logger.debug(f"SG refresh: area={area} addr={address}")
-
+                self._handle_sf_msg("SG_MSG", msg["SG_MSG"])
             if "SH_MSG" in msg:
-                # Signalling refresh finished
-                data = msg["SH_MSG"]
-                area = data.get("area_id", "")
+                area = msg["SH_MSG"].get("area_id", "")
                 logger.debug(f"SG refresh complete for area {area}")
-
             if "CT_MSG" in msg:
-                # Heartbeat
                 self.last_heartbeat = datetime.now(timezone.utc)
+
+    def _handle_ca_msg(self, data: dict):
+        """Berth step: train moved from one berth to another."""
+        if data.get("area_id", "") != self.tracker.area_id:
+            return
+        from_berth = data.get("from", "")
+        to_berth = data.get("to", "")
+        headcode = data.get("descr", "")
+        timestamp = self._parse_td_time(data.get("time", ""))
+        if headcode and to_berth:
+            self.tracker.handle_td_step(from_berth, to_berth, headcode, timestamp)
+
+    def _handle_cb_msg(self, data: dict):
+        """Berth cancel: train description removed from berth."""
+        if data.get("area_id", "") != self.tracker.area_id:
+            return
+        from_berth = data.get("from", "")
+        headcode = data.get("descr", "")
+        timestamp = self._parse_td_time(data.get("time", ""))
+        if headcode and from_berth:
+            self.tracker.handle_td_cancel(from_berth, headcode, timestamp)
+
+    def _handle_cc_msg(self, data: dict):
+        """Berth interpose: train appeared in a berth (no 'from')."""
+        if data.get("area_id", "") != self.tracker.area_id:
+            return
+        to_berth = data.get("to", "")
+        headcode = data.get("descr", "")
+        timestamp = self._parse_td_time(data.get("time", ""))
+        if headcode and to_berth:
+            self.tracker.handle_td_step("", to_berth, headcode, timestamp)
+
+    def _record_sf(self, area: str, data: dict):
+        """Shared helper for SF/SG signalling event recording."""
+        if area != self.tracker.area_id or not self.history:
+            return False
+        address = data.get("address", "")
+        sf_data = data.get("data", "")
+        if address and sf_data:
+            self.history.record_sf_event(area, address, sf_data)
+            return True
+        return False
+
+    def _handle_sf_msg(self, msg_type: str, data: dict):
+        """S-Class signalling message (SF update or SG refresh)."""
+        area = data.get("area_id", "")
+        self._record_sf(area, data)
+        if msg_type == "SG_MSG":
+            address = data.get("address", "")
+            logger.debug(f"SG refresh: area={area} addr={address}")
 
     def _handle_trust(self, messages: list):
         """Process TRUST train movement messages."""
