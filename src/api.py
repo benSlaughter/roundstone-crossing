@@ -5,6 +5,7 @@ API server — exposes crossing status, predictions, health, and history.
 import os
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from fastapi import FastAPI, Query
 from fastapi.staticfiles import StaticFiles
@@ -16,6 +17,15 @@ from .tracker import TrainTracker
 
 STATIC_DIR = Path(__file__).parent.parent / "static"
 _START_TIME = datetime.now(timezone.utc)
+_GB_TZ = ZoneInfo("Europe/London")
+
+
+def _parse_rtt_time(iso_str: str) -> datetime:
+    """Parse an RTT ISO timestamp (GB local time) to UTC-aware datetime."""
+    dt = datetime.fromisoformat(iso_str)
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=_GB_TZ)
+    return dt.astimezone(timezone.utc)
 
 
 def create_app(tracker: TrainTracker, inferrer: CrossingInferrer, history: HistoryLogger,
@@ -185,7 +195,7 @@ def create_app(tracker: TrainTracker, inferrer: CrossingInferrer, history: Histo
                 continue
             seen.add(dedup_key)
             try:
-                dep_time = datetime.fromisoformat(dep_iso).astimezone(timezone.utc)
+                dep_time = _parse_rtt_time(dep_iso)
             except (ValueError, TypeError):
                 continue
             crossing_eta = dep_time + timedelta(seconds=offset_east)
@@ -212,7 +222,7 @@ def create_app(tracker: TrainTracker, inferrer: CrossingInferrer, history: Histo
                 continue
             seen.add(dedup_key)
             try:
-                dep_time = datetime.fromisoformat(dep_iso).astimezone(timezone.utc)
+                dep_time = _parse_rtt_time(dep_iso)
             except (ValueError, TypeError):
                 continue
             crossing_eta = dep_time + timedelta(seconds=offset_west)
@@ -277,7 +287,7 @@ def create_app(tracker: TrainTracker, inferrer: CrossingInferrer, history: Histo
                     {
                         "headcode": t["headcode"],
                         "direction": t["direction"],
-                        "crossing_eta": t["crossing_eta"].strftime("%H:%M"),
+                        "crossing_eta": t["crossing_eta"].astimezone(_GB_TZ).strftime("%H:%M"),
                         "origin": t["origin"],
                         "destination": t["destination"],
                     }
