@@ -48,6 +48,7 @@ services:
       - .env
     environment:
       - PYTHONUNBUFFERED=1
+      - API_HOST=0.0.0.0
 
 volumes:
   crossing-data:
