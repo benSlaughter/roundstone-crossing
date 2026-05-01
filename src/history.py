@@ -101,6 +101,15 @@ class HistoryLogger:
         db.execute("CREATE INDEX IF NOT EXISTS idx_sf_events_ts ON sf_events(timestamp)")
         db.execute("CREATE INDEX IF NOT EXISTS idx_sf_events_addr ON sf_events(address, timestamp)")
 
+        db.execute("""
+            CREATE TABLE IF NOT EXISTS feedback (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                message TEXT NOT NULL,
+                user_agent TEXT,
+                created_at TEXT NOT NULL
+            )
+        """)
+
         db.commit()
         db.close()
         logger.info(f"History database: {self.db_path}")
@@ -284,6 +293,30 @@ class HistoryLogger:
         params.append(limit)
         rows = db.execute(
             f"SELECT * FROM sf_events {where} ORDER BY timestamp DESC LIMIT ?", params
+        ).fetchall()
+        db.close()
+        return [dict(r) for r in rows]
+
+    def submit_feedback(self, message: str, user_agent: str = None) -> int:
+        """Store a feedback submission. Returns the feedback ID."""
+        now = datetime.now(timezone.utc).isoformat()
+        db = sqlite3.connect(str(self.db_path))
+        cur = db.execute(
+            "INSERT INTO feedback (message, user_agent, created_at) VALUES (?, ?, ?)",
+            (message, user_agent, now),
+        )
+        feedback_id = cur.lastrowid
+        db.commit()
+        db.close()
+        logger.info(f"Feedback #{feedback_id} submitted")
+        return feedback_id
+
+    def get_feedback(self, limit: int = 50) -> list[dict]:
+        """Retrieve recent feedback submissions."""
+        db = sqlite3.connect(str(self.db_path))
+        db.row_factory = sqlite3.Row
+        rows = db.execute(
+            "SELECT * FROM feedback ORDER BY created_at DESC LIMIT ?", (limit,)
         ).fetchall()
         db.close()
         return [dict(r) for r in rows]

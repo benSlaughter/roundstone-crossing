@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Roundstone Crossing</title>
-  <link rel="stylesheet" href="/static/style.css?v=2">
+  <link rel="stylesheet" href="/static/style.css?v=3">
 </head>
 <body>
   <h1>Roundstone Crossing</h1>
@@ -130,8 +130,28 @@
     <div id="trains-list"></div>
   </div>
 
-  <footer><span class="pulse" id="pulse"></span><span id="footer-text">Connecting…</span></footer>
+  <footer>
+    <span class="pulse" id="pulse"></span><span id="footer-text">Connecting…</span>
+    <span class="footer-sep">·</span>
+    <button class="feedback-btn" onclick="document.getElementById('feedback-modal').classList.add('open')">Feedback</button>
+  </footer>
 
-  <script src="/static/app.js?v=2"></script>
+  <div class="modal-overlay" id="feedback-modal">
+    <div class="modal">
+      <div class="modal-header">
+        <span>Send Feedback</span>
+        <button class="modal-close" onclick="document.getElementById('feedback-modal').classList.remove('open')">&times;</button>
+      </div>
+      <form id="feedback-form" onsubmit="submitFeedback(event)">
+        <textarea id="feedback-msg" placeholder="Bug report, suggestion, or just say hi…" rows="4" maxlength="2000" required></textarea>
+        <div class="modal-footer">
+          <span id="feedback-status"></span>
+          <button type="submit" class="feedback-submit">Send</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script src="/static/app.js?v=3"></script>
 </body>
 </html>

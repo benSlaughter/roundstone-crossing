@@ -492,3 +492,32 @@ document.addEventListener('visibilitychange', () => {
 });
 
 startPolling();
+
+// Feedback form
+async function submitFeedback(e) {
+  e.preventDefault();
+  const msg = document.getElementById('feedback-msg');
+  const status = document.getElementById('feedback-status');
+  const btn = e.target.querySelector('.feedback-submit');
+  btn.disabled = true;
+  status.textContent = 'Sending…';
+  try {
+    const r = await fetch('/feedback', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: msg.value }),
+    });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    status.textContent = 'Thank you!';
+    msg.value = '';
+    setTimeout(() => {
+      document.getElementById('feedback-modal').classList.remove('open');
+      status.textContent = '';
+    }, 1500);
+  } catch (err) {
+    status.textContent = 'Failed to send — try again';
+    console.error('Feedback error:', err);
+  } finally {
+    btn.disabled = false;
+  }
+}

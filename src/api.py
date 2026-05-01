@@ -7,9 +7,10 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from fastapi import FastAPI, Query
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
+from pydantic import BaseModel, Field
 
 from .inferrer import CrossingInferrer
 from .history import HistoryLogger
@@ -314,6 +315,30 @@ def create_app(tracker: TrainTracker, inferrer: CrossingInferrer, history: Histo
     ):
         """Recent S-Class signalling events."""
         return {"events": history.get_sf_events(since=since, address=address, limit=limit)}
+
+    _ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN", "")
+
+    def _check_admin(authorization: str = Header(None)):
+        if not _ADMIN_TOKEN:
+            raise HTTPException(503, "Admin token not configured")
+        if not authorization or authorization != f"Bearer {_ADMIN_TOKEN}":
+            raise HTTPException(401, "Unauthorized")
+
+    class FeedbackBody(BaseModel):
+        message: str = Field(..., min_length=1, max_length=2000)
+
+    @app.post("/feedback")
+    async def submit_feedback(body: FeedbackBody, request: Request):
+        """Submit user feedback."""
+        ua = request.headers.get("user-agent", "")
+        fid = history.submit_feedback(body.message, user_agent=ua)
+        return {"ok": True, "id": fid}
+
+    @app.get("/feedback")
+    async def get_feedback(limit: int = Query(50, ge=1, le=200),
+                           _=Depends(_check_admin)):
+        """Retrieve feedback submissions."""
+        return {"feedback": history.get_feedback(limit=limit)}
 
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
