@@ -121,6 +121,11 @@ def create_app(tracker: TrainTracker, inferrer: CrossingInferrer, history: Histo
             return {"error": "RTT not available"}
         return {"services": rtt_client.get_upcoming(station, limit)}
 
+    @app.get("/up")
+    async def up():
+        """Minimal liveness probe for load balancers and uptime monitors."""
+        return {"status": "ok"}
+
     @app.get("/health")
     async def health():
         """System health: uptime, feed status, DB size, tracked trains."""
