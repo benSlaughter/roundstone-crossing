@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Roundstone Crossing</title>
-  <link rel="stylesheet" href="/static/style.css?v=4">
+  <link rel="stylesheet" href="/static/style.css?v=5">
 </head>
 <body>
   <h1>Roundstone Crossing</h1>
@@ -17,7 +17,7 @@
     <div class="confidence">
       <span id="confidence-text">—</span>
       <div class="confidence-bar">
-        <div class="confidence-fill" id="confidence-fill" style="width: 0%"></div>
+        <div class="confidence-fill" id="confidence-fill"></div>
       </div>
     </div>
   </div>
@@ -43,15 +43,15 @@
       <div class="track-arrow arrow-up">East →</div>
       <div class="track-arrow arrow-down">← West</div>
       <!-- Angmering station (~17% from left) -->
-      <div class="station" style="left: 17%;">
+      <div class="station station-ang">
         <div class="station-name">Angmering</div>
       </div>
       <!-- Goring station (~83% from left) -->
-      <div class="station" style="left: 83%;">
+      <div class="station station-gbs">
         <div class="station-name">Goring</div>
       </div>
       <!-- Crossing (~27% — just east of Angmering) -->
-      <div class="crossing-marker" style="left: 32%;">
+      <div class="crossing-marker">
         <div class="crossing-road"></div>
         <div class="crossing-light unknown" id="crossing-light"></div>
         <div class="crossing-label">Crossing</div>
@@ -61,12 +61,12 @@
     </div>
     </div><!-- end tab-map -->
 
-    <div class="predictions-panel" id="tab-predictions" style="display:none">
+    <div class="predictions-panel tab-hidden" id="tab-predictions">
       <div id="predictions-current"></div>
       <div id="predictions-list"><div class="empty">Select Predictions tab to load…</div></div>
     </div>
 
-    <div class="upcoming-panel" id="tab-upcoming" style="display:none">
+    <div class="upcoming-panel tab-hidden" id="tab-upcoming">
       <div class="sub-tabs">
         <button class="sub-tab active" data-station="ANG">Angmering</button>
         <button class="sub-tab" data-station="GBS">Goring-by-Sea</button>
@@ -76,12 +76,12 @@
           <tr><th></th><th>Train</th><th>Arrives</th><th>Departs</th><th>From</th><th>To</th><th>Status</th></tr>
         </thead>
         <tbody id="upcoming-body">
-          <tr><td colspan="7" style="color:#71717a">Select Upcoming tab to load…</td></tr>
+          <tr><td colspan="7" class="tab-placeholder">Select Upcoming tab to load…</td></tr>
         </tbody>
       </table>
     </div>
 
-    <div class="legend-panel" id="tab-info" style="display:none">
+    <div class="legend-panel tab-hidden" id="tab-info">
       <dl>
         <div class="legend-section">Train phases</div>
         <dt>Approaching</dt>
@@ -111,7 +111,7 @@
       </dl>
     </div>
 
-    <div id="tab-history" style="display:none">
+    <div id="tab-history" class="tab-hidden">
       <div class="sub-tabs">
         <button class="sub-tab active" data-history-sub="crossing">Crossing</button>
         <button class="sub-tab" data-history-sub="trains">Trains</button>
@@ -119,13 +119,13 @@
       <div id="history-sub-crossing">
         <div id="history-list"><div class="empty">Loading…</div></div>
       </div>
-      <div id="history-sub-trains" style="display:none">
+      <div id="history-sub-trains" class="tab-hidden">
         <div id="recent-trains-list"><div class="empty">Loading…</div></div>
       </div>
     </div>
   </div>
 
-  <div class="section" id="trains-section" style="display:none">
+  <div class="section tab-hidden" id="trains-section">
     <div class="section-title">Active Trains</div>
     <div id="trains-list"></div>
   </div>
@@ -152,6 +152,6 @@
     </div>
   </div>
 
-  <script src="/static/app.js?v=4"></script>
+  <script src="/static/app.js?v=5"></script>
 </body>
 </html>

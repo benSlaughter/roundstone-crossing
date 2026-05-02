@@ -185,7 +185,7 @@ async function updateStatus() {
     const trainsSection = document.getElementById('trains-section');
     const trainsList = document.getElementById('trains-list');
     if (data.active_trains && data.active_trains.length > 0) {
-      trainsSection.style.display = '';
+      trainsSection.classList.remove('tab-hidden');
       trainsList.innerHTML = data.active_trains.map(t => `
         <div class="train">
           <div>
@@ -196,7 +196,7 @@ async function updateStatus() {
         </div>
       `).join('');
     } else {
-      trainsSection.style.display = 'none';
+      trainsSection.classList.add('tab-hidden');
     }
 
     document.getElementById('footer-text').textContent =
@@ -357,15 +357,13 @@ let upcomingInterval = null;
 
 function switchTab(name, btn) {
   // Hide all tab contents
-  document.getElementById('tab-map').style.display = 'none';
-  document.getElementById('tab-predictions').style.display = 'none';
-  document.getElementById('tab-upcoming').style.display = 'none';
-  document.getElementById('tab-history').style.display = 'none';
-  document.getElementById('tab-info').style.display = 'none';
+  ['tab-map', 'tab-predictions', 'tab-upcoming', 'tab-history', 'tab-info'].forEach(id => {
+    document.getElementById(id).classList.add('tab-hidden');
+  });
   // Deactivate all tab buttons
   document.querySelectorAll('.tab-bar button').forEach(b => b.classList.remove('active'));
   // Show selected tab
-  document.getElementById('tab-' + name).style.display = 'block';
+  document.getElementById('tab-' + name).classList.remove('tab-hidden');
   btn.classList.add('active');
   // Manage upcoming polling
   if (name === 'upcoming') {
@@ -405,8 +403,8 @@ function switchUpcomingStation(crs, btn) {
 }
 
 function switchHistorySub(name, btn) {
-  document.getElementById('history-sub-crossing').style.display = name === 'crossing' ? 'block' : 'none';
-  document.getElementById('history-sub-trains').style.display = name === 'trains' ? 'block' : 'none';
+  document.getElementById('history-sub-crossing').classList.toggle('tab-hidden', name !== 'crossing');
+  document.getElementById('history-sub-trains').classList.toggle('tab-hidden', name !== 'trains');
   btn.parentElement.querySelectorAll('.sub-tab').forEach(t => t.classList.remove('active'));
   btn.classList.add('active');
 }

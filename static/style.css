@@ -1,4 +1,7 @@
 * { margin: 0; padding: 0; box-sizing: border-box; }
+.tab-hidden { display: none; }
+.tab-placeholder { color: #71717a; }
+.confidence-fill { width: 0%; }
 body {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   background: #0f1117;
@@ -387,6 +390,8 @@ footer {
   z-index: 2;
   transform: translateX(-50%);
 }
+.station-ang { left: 17%; }
+.station-gbs { left: 83%; }
 .station-name {
   font-size: 0.55rem;
   font-weight: 700;
@@ -410,6 +415,7 @@ footer {
 .crossing-marker {
   position: absolute;
   transform: translateX(-50%);
+  left: 32%;
   top: 0;
   bottom: 0;
   width: 30px;
