@@ -13,6 +13,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from .inferrer import CrossingInferrer
+from .models import CrossingState
 from .history import HistoryLogger
 from .tracker import TrainTracker
 from .utils import merge_closure_windows
@@ -310,6 +311,152 @@ def create_app(tracker: TrainTracker, inferrer: CrossingInferrer, history: Histo
         return {
             "windows": result_windows,
             "current_closure": current_closure,
+            "generated_at": now.isoformat(),
+        }
+
+    def _format_human_delta(seconds: float) -> str:
+        """Format seconds into a human-readable 'in X min' string."""
+        if seconds < 0:
+            return "now"
+        if seconds < 60:
+            return "less than 1 min"
+        minutes = int(seconds / 60)
+        if minutes < 60:
+            return f"in {minutes} min"
+        hours = minutes // 60
+        remaining = minutes % 60
+        if remaining == 0:
+            return f"in {hours}h"
+        return f"in {hours}h {remaining}m"
+
+    def _direction_label(direction) -> str | None:
+        """Normalize direction to east/west for public API."""
+        if direction is None:
+            return None
+        d = direction if isinstance(direction, str) else direction.value
+        return {"up": "east", "down": "west"}.get(d, d)
+
+    @app.get("/predictions/next")
+    async def prediction_next(limit: int = Query(5, ge=1, le=20)):
+        """Upcoming crossing events — designed for notifications and HA integration.
+
+        Returns a list of predicted state-change events (closing, opening)
+        combining live train data with RTT schedule predictions.
+        """
+        now = datetime.now(timezone.utc)
+        status = inferrer.status
+        timing = tracker.config.get("timing", {})
+        pre_closure = timing.get("pre_closure_secs", 120)
+        crossing_clearance = timing.get("crossing_clearance_secs", 10)
+        post_clearance = timing.get("post_clearance_secs", 5)
+
+        # Build a unified list of closure windows by merging live + schedule
+
+        # Step 1: Build a synthetic window for the current live closure (if any)
+        live_window = None
+        if status.state in (CrossingState.CLOSING_PREDICTED,
+                            CrossingState.CLOSED_INFERRED,
+                            CrossingState.OPENING_PREDICTED):
+            live_close_at = status.since
+            live_open_at = status.predicted_change
+            if live_open_at is None:
+                # No predicted opening — estimate from active trains
+                latest_eta = max(
+                    (t.predicted_at_crossing for t in status.active_trains
+                     if t.predicted_at_crossing),
+                    default=now,
+                )
+                live_open_at = latest_eta + timedelta(
+                    seconds=crossing_clearance + post_clearance
+                )
+            live_window = {
+                "close_at": live_close_at,
+                "open_at": live_open_at,
+                "trains": [
+                    {
+                        "headcode": t.headcode,
+                        "direction": _direction_label(t.direction),
+                    }
+                    for t in status.active_trains
+                ],
+                "source": "live",
+            }
+
+        # Step 2: Fetch RTT schedule windows
+        schedule_windows = []
+        if rtt_client:
+            predictions = _fetch_crossing_predictions(rtt_client, tracker.config)
+            merged = merge_closure_windows(
+                predictions,
+                pre_closure_secs=pre_closure,
+                crossing_clearance_secs=crossing_clearance,
+                post_clearance_secs=post_clearance,
+            )
+            for w in merged:
+                schedule_windows.append({
+                    "close_at": w["close_at"],
+                    "open_at": w["open_at"],
+                    "trains": [
+                        {
+                            "headcode": t.get("headcode", ""),
+                            "direction": _direction_label(t.get("direction")),
+                        }
+                        for t in w["trains"]
+                    ],
+                    "source": "schedule",
+                })
+
+        # Step 3: Merge live window with schedule windows
+        all_windows = []
+        if live_window:
+            all_windows.append(live_window)
+        for sw in schedule_windows:
+            # Skip schedule windows that overlap with the live window
+            if live_window and sw["close_at"] <= live_window["open_at"]:
+                # Extend live window if the schedule window extends further
+                if sw["open_at"] > live_window["open_at"]:
+                    live_window["open_at"] = sw["open_at"]
+                    live_window["trains"].extend(sw["trains"])
+                continue
+            all_windows.append(sw)
+
+        # Step 4: Convert windows to events (closing/opening pairs)
+        events = []
+        for w in all_windows:
+            close_secs = (w["close_at"] - now).total_seconds()
+            open_secs = (w["open_at"] - now).total_seconds()
+
+            # Only include future events (or currently-happening ones)
+            if close_secs > -60:
+                events.append({
+                    "event": "closing",
+                    "at": w["close_at"].isoformat(),
+                    "in_seconds": max(0, round(close_secs)),
+                    "in_human": _format_human_delta(close_secs),
+                    "source": w["source"],
+                    "confidence": 0.9 if w["source"] == "live" else 0.6,
+                    "trains": w["trains"],
+                })
+
+            if open_secs > 0:
+                events.append({
+                    "event": "opening",
+                    "at": w["open_at"].isoformat(),
+                    "in_seconds": round(open_secs),
+                    "in_human": _format_human_delta(open_secs),
+                    "source": w["source"],
+                    "confidence": 0.7 if w["source"] == "live" else 0.5,
+                    "trains": [],
+                })
+
+        # Sort by time and limit
+        events.sort(key=lambda e: e["at"])
+        events = events[:limit]
+
+        return {
+            "current_state": status.state.value,
+            "confidence": round(status.confidence, 2),
+            "events": events,
             "generated_at": now.isoformat(),
         }
 

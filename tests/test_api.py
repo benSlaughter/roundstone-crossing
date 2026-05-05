@@ -386,3 +386,139 @@ class TestFeedbackGet:
         client = TestClient(app)
         resp = client.get("/feedback", headers={"Authorization": "Bearer anything"})
         assert resp.status_code == 503
+
+
+# ── Predictions/next endpoint ────────────────────────────────────────
+
+class TestPredictionsNext:
+
+    def test_no_rtt_returns_current_state(self, client):
+        """Without RTT and no active trains, returns empty events."""
+        resp = client.get("/predictions/next")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "current_state" in data
+        assert "events" in data
+        assert "generated_at" in data
+        assert isinstance(data["events"], list)
+
+    def test_with_schedule_events(self, tracker, inferrer, history_db):
+        """RTT data produces closing/opening event pairs."""
+        mock_rtt = MagicMock()
+        from datetime import datetime, timezone, timedelta
+        future = datetime.now(timezone.utc) + timedelta(minutes=15)
+        dep_iso = future.isoformat()
+        mock_rtt.get_upcoming.side_effect = lambda crs, limit: [
+            {
+                "headcode": "1H23", "direction": "east",
+                "departure_iso": dep_iso, "arrival_iso": None,
+                "origin": "Littlehampton", "destination": "London Victoria",
+            }
+        ] if crs == "ANG" else []
+        app = create_app(tracker, inferrer, history_db, rtt_client=mock_rtt)
+        client = TestClient(app)
+        resp = client.get("/predictions/next")
+        data = resp.json()
+        assert data["current_state"] == "unknown"
+        events = data["events"]
+        assert len(events) >= 2
+        assert events[0]["event"] == "closing"
+        assert events[1]["event"] == "opening"
+        assert events[0]["source"] == "schedule"
+        assert events[0]["in_seconds"] > 0
+        assert "in_human" in events[0]
+        assert len(events[0]["trains"]) == 1
+        assert events[0]["trains"][0]["headcode"] == "1H23"
+        assert events[0]["trains"][0]["direction"] == "east"
+
+    def test_live_closure_produces_events(self, tracker, inferrer, history_db):
+        """When crossing is closed, live opening event is returned."""
+        from datetime import datetime, timezone, timedelta
+        from src.models import CrossingState
+
+        inferrer.status.state = CrossingState.CLOSED_INFERRED
+        inferrer.status.confidence = 0.9
+        inferrer.status.since = datetime.now(timezone.utc) - timedelta(seconds=30)
+        inferrer.status.predicted_change = datetime.now(timezone.utc) + timedelta(seconds=60)
+        inferrer.status.predicted_next_state = CrossingState.OPENING_PREDICTED
+        inferrer.status.active_trains = [
+            TrackedTrain(headcode="2B45", direction=Direction.DOWN,
+                         phase=TrainPhase.AT_CROSSING),
+        ]
+
+        app = create_app(tracker, inferrer, history_db)
+        client = TestClient(app)
+        resp = client.get("/predictions/next")
+        data = resp.json()
+        assert data["current_state"] == "closed_inferred"
+        events = data["events"]
+        # Should have at least an opening event
+        opening_events = [e for e in events if e["event"] == "opening"]
+        assert len(opening_events) >= 1
+        assert opening_events[0]["source"] == "live"
+        assert opening_events[0]["in_seconds"] > 0
+
+    def test_limit_parameter(self, tracker, inferrer, history_db):
+        """Limit parameter restricts number of events."""
+        mock_rtt = MagicMock()
+        from datetime import datetime, timezone, timedelta
+        # Create multiple future trains
+        services = []
+        for i in range(5):
+            future = datetime.now(timezone.utc) + timedelta(minutes=15 + i * 30)
+            services.append({
+                "headcode": f"1A0{i}", "direction": "east",
+                "departure_iso": future.isoformat(), "arrival_iso": None,
+                "origin": "A", "destination": "B",
+            })
+        mock_rtt.get_upcoming.side_effect = lambda crs, limit: services if crs == "ANG" else []
+        app = create_app(tracker, inferrer, history_db, rtt_client=mock_rtt)
+        client = TestClient(app)
+        resp = client.get("/predictions/next?limit=2")
+        data = resp.json()
+        assert len(data["events"]) == 2
+
+    def test_directions_normalized(self, tracker, inferrer, history_db):
+        """Directions are normalized to east/west in output."""
+        from datetime import datetime, timezone, timedelta
+        from src.models import CrossingState
+
+        inferrer.status.state = CrossingState.CLOSING_PREDICTED
+        inferrer.status.confidence = 0.8
+        inferrer.status.since = datetime.now(timezone.utc)
+        inferrer.status.predicted_change = datetime.now(timezone.utc) + timedelta(seconds=30)
+        inferrer.status.predicted_next_state = CrossingState.CLOSED_INFERRED
+        inferrer.status.active_trains = [
+            TrackedTrain(headcode="1X99", direction=Direction.UP,
+                         phase=TrainPhase.STRIKE_IN),
+        ]
+
+        app = create_app(tracker, inferrer, history_db)
+        client = TestClient(app)
+        resp = client.get("/predictions/next")
+        data = resp.json()
+        events = data["events"]
+        closing_events = [e for e in events if e["event"] == "closing"]
+        assert len(closing_events) >= 1
+        for t in closing_events[0]["trains"]:
+            assert t["direction"] in ("east", "west", None)
+
+    def test_human_formatting(self, tracker, inferrer, history_db):
+        """in_human field provides readable text."""
+        mock_rtt = MagicMock()
+        from datetime import datetime, timezone, timedelta
+        future = datetime.now(timezone.utc) + timedelta(minutes=5)
+        mock_rtt.get_upcoming.side_effect = lambda crs, limit: [
+            {
+                "headcode": "1A23", "direction": "east",
+                "departure_iso": future.isoformat(), "arrival_iso": None,
+                "origin": "A", "destination": "B",
+            }
+        ] if crs == "ANG" else []
+        app = create_app(tracker, inferrer, history_db, rtt_client=mock_rtt)
+        client = TestClient(app)
+        resp = client.get("/predictions/next")
+        data = resp.json()
+        for event in data["events"]:
+            assert isinstance(event["in_human"], str)
+            assert event["in_human"] != ""
