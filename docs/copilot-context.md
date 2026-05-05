@@ -62,9 +62,9 @@ NROD STOMP Feeds (TD + TRUST + SF)
 
 ### ✅ What's Done
 - Full prediction pipeline: feed → tracker → inferrer → API → web dashboard
-- 165 automated tests, all passing (~2s)
+- 232 automated tests, all passing (~2s)
 - S-Class signalling message logging (SF/SG/SH/CT) for future barrier state correlation
-- RTT integration for station-level train enrichment
+- RTT integration for station-level train enrichment (with tests)
 - Web dashboard with CSS/JS extracted to separate files (`static/style.css`, `static/app.js`)
 - Manual observation data collection (4 days: Apr 28-30, May 1) with precision tracking
 - Timing parameters calibrated from real observations
@@ -77,6 +77,10 @@ NROD STOMP Feeds (TD + TRUST + SF)
 - Production deployment — running on server at `crossing.benslaughter.com` with nginx reverse proxy + SSL
 - Feedback form — modal in site footer, stored to SQLite, admin-protected GET endpoint (Bearer token via ADMIN_TOKEN env var)
 - UTC/BST timezone handling — RTT times correctly tagged as Europe/London before UTC conversion
+- Quality audit completed — blocking bugs fixed (thread safety, SQLite timeout), window merging refactored into `src/utils.py`
+- Strict CSP headers — all inline styles moved to CSS classes, Content-Security-Policy middleware on all responses
+- `/up` health endpoint for uptime monitors (returns 200 + JSON uptime)
+- Config validation at startup — `config.yaml` validated with clear error messages on missing/invalid fields
 
 ### 🔲 Remaining Work
 1. **SF correlation** (blocked) — Attempted to identify which SF address+bit = barrier state. Area LA data (8 addresses) does not correlate with observed closures. The barrier control may be on a different signalling area or not published via NROD. Needs further research or broader SF capture.
@@ -91,7 +95,7 @@ NROD STOMP Feeds (TD + TRUST + SF)
 |---|---|
 | `src/models.py` | CrossingState, TrackedTrain, CrossingStatus dataclasses |
 | `src/tracker.py` | Per-train tracking from TD + TRUST + RTT, stale cleanup |
-| `src/inferrer.py` | Derives crossing state, no-bounce logic, window merging |
+| `src/inferrer.py` | Derives crossing state, no-bounce logic |
 | `src/history.py` | SQLite logger (state_intervals, train_passages, train_events, sf_events, feedback) |
 | `src/feed.py` | NROD STOMP connection, TD/TRUST/SF message handling, auto-reconnect |
 | `src/rtt.py` | Realtime Trains API client for station platform status |
@@ -101,7 +105,8 @@ NROD STOMP Feeds (TD + TRUST + SF)
 | `static/index.html` | Web dashboard HTML |
 | `static/style.css` | Dashboard styles |
 | `static/app.js` | Dashboard JavaScript |
-| `tests/` | 165 tests across inferrer, tracker, feed, API, history |
+| `src/utils.py` | Shared utilities (window merging, helpers) |
+| `tests/` | 232 tests across inferrer, tracker, feed, API, history, RTT, models |
 | `device/` | ESP32-C3 barrier logger (firmware, docs, schematics) |
 | `data/observations/` | Manual crossing observations with accuracy notes |
 | `docs/research.md` | Full research on data sources, APIs, crossing details |
@@ -116,7 +121,7 @@ NROD STOMP Feeds (TD + TRUST + SF)
 cd ~/projects/roundstone-crossing
 source .venv/bin/activate
 python -m src.main --api --debug   # predictor + API on 127.0.0.1:8590
-python -m pytest tests/ -v         # run test suite (165 tests, ~2s)
+python -m pytest tests/ -v         # run test suite (232 tests, ~2s)
 ```
 
 The server writes its PID to `server.pid` (gitignored).

@@ -10,14 +10,14 @@ Quality, polish, and reliability. Make what exists work better.
 
 | | Item | Why |
 |---|---|---|
-| 🧪 | **Test coverage: `rtt.py`** (currently 0%) | RTT polling is critical to prediction accuracy — untested code is fragile code |
-| 🧪 | **Test coverage: `feed.py`** (currently 57%) | The STOMP feed is the backbone; reconnect logic and message parsing need solid coverage |
+| ~~🧪~~ | ~~**Test coverage: `rtt.py`**~~ | ✅ Done — `test_rtt.py` added |
+| ~~🧪~~ | ~~**Test coverage: `feed.py`**~~ | ✅ Done — coverage improved |
 | 🔒 | **Rate limiting** | Protect the public-facing API from abuse — basic middleware on FastAPI |
-| 🔒 | **CORS policy** | Lock down cross-origin requests to expected origins only |
-| 🔒 | **CSP headers** | Content Security Policy to mitigate XSS and injection attacks |
+| ~~🔒~~ | ~~**CORS policy**~~ | ✅ Done — no CORS headers = browsers block cross-origin by default (confirmed in audit) |
+| ~~🔒~~ | ~~**CSP headers**~~ | ✅ Done — Content-Security-Policy middleware added, inline styles removed |
 | 🎨 | **Custom error pages** | Styled 404/500 pages matching the dark theme instead of bare FastAPI defaults |
 | 🎨 | **Logo and branding** | Give the project a visual identity — explore AI-generated logo options |
-| 🔧 | **Tech debt cleanup** | Address findings from the code audit — dead code, naming, structural improvements |
+| ~~🔧~~ | ~~**Tech debt cleanup**~~ | ✅ Done — window merging extracted, predictions endpoint broken up, _handle_td refactored |
 | 🎨 | **Feedback form polish** | Improve the modal UX, add confirmation toast, maybe a character counter |
 
 ---
@@ -97,4 +97,4 @@ Architecture, testing, and infrastructure improvements that underpin everything 
 
 ---
 
-*Last updated: July 2025*
+*Last updated: May 2026*

@@ -4,6 +4,8 @@
 **Auditors:** 4 parallel audits (security, test coverage, code quality, tech debt) + rubber duck / devil's advocate review
 **Summary:** Well-structured hobby project with strong domain modelling and 93% test coverage. Two blocking reliability bugs found (thread safety, SQLite timeout). Several medium-priority improvements identified. No catastrophic design failures.
 
+> **Remediation status (May 2026):** All blocking issues (§1) fixed. Medium+ code quality findings (§4) addressed — window merging extracted to `src/utils.py`, predictions endpoint broken up, `_handle_td` refactored, SF/SG handlers deduplicated. CSP headers added (§S4). RTT tests added (§3 — `test_rtt.py`). Config validation added at startup. Test count: 232 (up from 165 at audit time).
+
 ---
 
 ## Executive Summary
@@ -12,7 +14,7 @@ Roundstone Crossing Predictor is a well-engineered hobby project with clean sepa
 
 | Metric | Value |
 |---|---|
-| Test coverage | 93% overall, 165 tests passing |
+| Test coverage | 93% overall, 232 tests passing |
 | Blocking issues | 2 (thread safety, SQLite timeout) |
 | Security vulnerabilities | 0 critical, 2 medium, 1 high (rate limiting) |
 | False positives filtered | 3 (CORS, esc() sufficiency, import caching) |

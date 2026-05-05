@@ -66,6 +66,9 @@ GET /next?station=         — Upcoming services at a station (ANG or GBS)
 GET /history               — Query historical open/close intervals
 GET /stats                 — Summary statistics
 GET /health                — System health (uptime, feed status, DB size)
+GET /up                    — Simple uptime check (200 + JSON uptime)
+GET /sf/summary            — S-Class signalling summary
+GET /sf                    — S-Class signalling events
 POST /feedback             — Submit feedback (JSON: {"message": "..."})
 GET /feedback              — Retrieve feedback (requires Authorization: Bearer <token>)
 ```
