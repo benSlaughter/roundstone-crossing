@@ -38,6 +38,10 @@ class RTTClient:
         # Rate limit backoff — shared across all requests
         self._retry_after: datetime | None = None
 
+        # Response cache: {crs: (data_dict, fetched_at)}
+        self._cache: dict[str, tuple[dict, datetime]] = {}
+        self._cache_ttl = 60  # seconds
+
         self._thread: threading.Thread | None = None
         self._running = False
         self._on_update: Callable | None = None
@@ -79,16 +83,6 @@ class RTTClient:
 
     def _poll_all_stations(self):
         """Poll all configured stations."""
-        # Check global rate limit backoff
-        if self._retry_after and datetime.now(timezone.utc) < self._retry_after:
-            wait = (self._retry_after - datetime.now(timezone.utc)).total_seconds()
-            logger.debug(f"RTT rate limited, waiting {wait:.0f}s")
-            return
-
-        # Ensure we have a valid access token
-        if not self._ensure_token():
-            return
-
         for crs in self.stations:
             if not self._running:
                 break
@@ -131,8 +125,28 @@ class RTTClient:
             logger.error(f"RTT token refresh failed: {e}")
             return False
 
-    def _poll_station(self, crs: str):
-        """Poll a single station for current services."""
+    def _fetch_station(self, crs: str, *, bypass_cache: bool = False) -> dict | None:
+        """Fetch station data from RTT, with 60s response caching.
+
+        Returns parsed JSON dict, or None on error/rate-limit/empty.
+        """
+        now = datetime.now(timezone.utc)
+
+        # Check cache first
+        if not bypass_cache and crs in self._cache:
+            data, fetched_at = self._cache[crs]
+            age = (now - fetched_at).total_seconds()
+            if age < self._cache_ttl:
+                logger.debug(f"RTT cache hit for {crs} ({age:.0f}s old)")
+                return data
+
+        # Need fresh data — ensure token and check rate limit
+        if not self._ensure_token():
+            return None
+
+        if self._retry_after and now < self._retry_after:
+            return None
+
         try:
             resp = requests.get(
                 f"{self.BASE_URL}/gb-nr/location",
@@ -143,38 +157,38 @@ class RTTClient:
 
             if resp.status_code == 429:
                 self._handle_rate_limit(resp)
-                return
+                return None
 
             if resp.status_code == 204:
-                # No services found
-                return
+                return None
 
             resp.raise_for_status()
             data = resp.json()
+            self._cache[crs] = (data, now)
+            return data
 
-            station_name = data.get("query", {}).get("location", {}).get("description", crs)
-            services = data.get("services", [])
+        except Exception as e:
+            logger.error(f"RTT fetch {crs} failed: {e}")
+            return None
 
-            for svc in services:
-                self._process_service(svc, station_name)
+    def _poll_station(self, crs: str):
+        """Poll a single station for current services."""
+        data = self._fetch_station(crs)
+        if data is None:
+            return
 
-        except requests.exceptions.RequestException as e:
-            logger.error(f"RTT poll {crs} failed: {e}")
+        station_name = data.get("query", {}).get("location", {}).get("description", crs)
+        services = data.get("services", [])
+
+        for svc in services:
+            self._process_service(svc, station_name)
 
     def get_upcoming(self, crs: str, limit: int = 5) -> list[dict]:
         """Query upcoming services at a station. Returns list of service dicts."""
-        if not self._ensure_token():
+        data = self._fetch_station(crs)
+        if data is None:
             return []
         try:
-            resp = requests.get(
-                f"{self.BASE_URL}/gb-nr/location",
-                params={"code": crs},
-                headers={"Authorization": f"Bearer {self._access_token}"},
-                timeout=10,
-            )
-            if resp.status_code != 200:
-                return []
-            data = resp.json()
             station_name = data.get("query", {}).get("location", {}).get("description", crs)
             services = data.get("services", [])
 
@@ -263,20 +277,10 @@ class RTTClient:
 
     def get_raw_services(self, crs: str) -> dict:
         """Debug: return raw RTT response for a station."""
-        if not self._ensure_token():
-            return {}
-        try:
-            resp = requests.get(
-                f"{self.BASE_URL}/gb-nr/location",
-                params={"code": crs},
-                headers={"Authorization": f"Bearer {self._access_token}"},
-                timeout=10,
-            )
-            if resp.status_code != 200:
-                return {"error": resp.status_code}
-            return resp.json()
-        except Exception as e:
-            return {"error": str(e)}
+        data = self._fetch_station(crs)
+        if data is None:
+            return {"error": "fetch failed"}
+        return data
 
     def _process_service(self, svc: dict, station_name: str):
         """Extract relevant data from a service and notify callback."""

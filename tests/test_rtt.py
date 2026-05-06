@@ -182,6 +182,7 @@ class TestPollStation:
 
     def test_successful_poll_calls_process_service(self, rtt):
         rtt._access_token = "token"
+        rtt._token_expires = datetime.now(timezone.utc) + timedelta(hours=1)
         mock_resp = MagicMock()
         mock_resp.status_code = 200
         mock_resp.json.return_value = {
@@ -201,6 +202,7 @@ class TestPollStation:
 
     def test_http_error(self, rtt):
         rtt._access_token = "token"
+        rtt._token_expires = datetime.now(timezone.utc) + timedelta(hours=1)
         mock_resp = MagicMock()
         mock_resp.status_code = 500
         mock_resp.raise_for_status.side_effect = requests.exceptions.HTTPError("500")
@@ -210,12 +212,14 @@ class TestPollStation:
 
     def test_timeout(self, rtt):
         rtt._access_token = "token"
+        rtt._token_expires = datetime.now(timezone.utc) + timedelta(hours=1)
 
         with patch("src.rtt.requests.get", side_effect=requests.exceptions.Timeout("timeout")):
             rtt._poll_station("ANG")  # should not raise
 
     def test_204_no_services(self, rtt):
         rtt._access_token = "token"
+        rtt._token_expires = datetime.now(timezone.utc) + timedelta(hours=1)
         mock_resp = MagicMock()
         mock_resp.status_code = 204
 
@@ -224,6 +228,7 @@ class TestPollStation:
 
     def test_rate_limited(self, rtt):
         rtt._access_token = "token"
+        rtt._token_expires = datetime.now(timezone.utc) + timedelta(hours=1)
         mock_resp = MagicMock()
         mock_resp.status_code = 429
         mock_resp.headers = {"Retry-After": "30"}
@@ -613,3 +618,56 @@ class TestRTTClientInit:
         rtt._running = True
         rtt.stop()
         assert rtt._running is False
+
+
+# ── Response caching ─────────────────────────────────────────────────
+
+class TestFetchStationCache:
+
+    def _setup_token(self, rtt):
+        rtt._access_token = "token"
+        rtt._token_expires = datetime.now(timezone.utc) + timedelta(hours=1)
+
+    def test_cache_hit_avoids_http_call(self, rtt):
+        self._setup_token(rtt)
+        cached_data = {"query": {"location": {"description": "Angmering"}}, "services": []}
+        rtt._cache["ANG"] = (cached_data, datetime.now(timezone.utc))
+
+        with patch("src.rtt.requests.get") as mock_get:
+            result = rtt._fetch_station("ANG")
+
+        mock_get.assert_not_called()
+        assert result == cached_data
+
+    def test_expired_cache_makes_http_call(self, rtt):
+        self._setup_token(rtt)
+        old_data = {"query": {"location": {"description": "Angmering"}}, "services": []}
+        rtt._cache["ANG"] = (old_data, datetime.now(timezone.utc) - timedelta(seconds=120))
+
+        new_data = {"query": {"location": {"description": "Angmering"}}, "services": [{"new": True}]}
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = new_data
+
+        with patch("src.rtt.requests.get", return_value=mock_resp):
+            result = rtt._fetch_station("ANG")
+
+        assert result == new_data
+
+    def test_bypass_cache_forces_http_call(self, rtt):
+        self._setup_token(rtt)
+        cached_data = {"query": {"location": {"description": "Angmering"}}, "services": []}
+        rtt._cache["ANG"] = (cached_data, datetime.now(timezone.utc))
+
+        new_data = {"query": {"location": {"description": "Angmering"}}, "services": [{"fresh": True}]}
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = new_data
+
+        with patch("src.rtt.requests.get", return_value=mock_resp):
+            result = rtt._fetch_station("ANG", bypass_cache=True)
+
+        assert result == new_data
+
+    def test_cache_default_ttl(self, rtt):
+        assert rtt._cache_ttl == 60
