@@ -150,14 +150,44 @@ def create_app(tracker: TrainTracker, inferrer: CrossingInferrer, history: Histo
                 if t.phase.value not in ("cleared", "lost")
             )
 
+        # RTT status
+        rtt_info = {"available": rtt_client is not None}
+        rtt_rate_limited = False
+        if rtt_client is not None:
+            rl = rtt_client.rate_limit_info
+            rtt_info["rate_limited"] = rl["active"]
+            if rl["active"]:
+                rtt_rate_limited = True
+                rtt_info["rate_limited_until"] = rl["until"]
+                rtt_info["rate_limited_remaining_secs"] = rl["remaining_secs"]
+
+        # Build warnings list
+        feed_stale = feed_age is not None and feed_age > stale_threshold
+        warnings = []
+        if feed_stale:
+            warnings.append("Network Rail feed is stale — crossing state may be outdated")
+        if feed_age is None:
+            warnings.append("Network Rail feed has not connected — no live data")
+        if rtt_rate_limited:
+            secs = rtt_info.get("rate_limited_remaining_secs", 0)
+            warnings.append(f"Train schedule API is rate-limited — predictions may be unavailable for ~{secs}s")
+        if rtt_client is None:
+            warnings.append("Train schedule integration is not configured")
+
+        overall = "healthy"
+        if feed_stale or feed_age is None:
+            overall = "degraded"
+        elif rtt_rate_limited:
+            overall = "degraded"
+
         return {
-            "status": "healthy" if feed_age is not None and feed_age < stale_threshold else "degraded",
+            "status": overall,
             "uptime_secs": round(uptime_secs),
             "started_at": _START_TIME.isoformat(),
             "feed": {
                 "last_message": feed_time.isoformat() if feed_time else None,
                 "age_secs": round(feed_age) if feed_age is not None else None,
-                "stale": feed_age is not None and feed_age > stale_threshold,
+                "stale": feed_stale,
             },
             "crossing_state": inferrer.status.state.value,
             "trains": {
@@ -165,7 +195,8 @@ def create_app(tracker: TrainTracker, inferrer: CrossingInferrer, history: Histo
                 "total_tracked": total_trains,
             },
             "db_size_mb": db_size_mb,
-            "rtt_available": rtt_client is not None,
+            "rtt": rtt_info,
+            "warnings": warnings,
         }
 
     def _fetch_crossing_predictions(rtt, tracker_config):

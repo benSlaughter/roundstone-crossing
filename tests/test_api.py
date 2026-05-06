@@ -522,3 +522,50 @@ class TestPredictionsNext:
         for event in data["events"]:
             assert isinstance(event["in_human"], str)
             assert event["in_human"] != ""
+
+
+# ── Health endpoint: warnings and RTT status ─────────────────────────
+
+def test_health_includes_warnings_and_rtt(client):
+    """Health response has warnings array and rtt section."""
+    resp = client.get("/health")
+    data = resp.json()
+    assert "warnings" in data
+    assert isinstance(data["warnings"], list)
+    assert "rtt" in data
+    assert data["rtt"]["available"] is False  # no rtt_client in default fixture
+
+
+def test_health_no_feed_has_warning(client):
+    """When no feed messages received, warnings includes feed message."""
+    data = client.get("/health").json()
+    assert any("feed" in w.lower() or "no live data" in w.lower() for w in data["warnings"])
+
+
+def test_health_with_rtt_rate_limited(tracker, inferrer, history_db):
+    """When RTT is rate-limited, health shows warning and rtt.rate_limited=True."""
+    from datetime import datetime, timezone, timedelta
+    mock_rtt = MagicMock()
+    mock_rtt.rate_limit_info = {
+        "active": True,
+        "until": (datetime.now(timezone.utc) + timedelta(seconds=30)).isoformat(),
+        "remaining_secs": 30,
+    }
+    app = create_app(tracker, inferrer, history_db, rtt_client=mock_rtt)
+    client = TestClient(app)
+    data = client.get("/health").json()
+    assert data["rtt"]["rate_limited"] is True
+    assert data["rtt"]["rate_limited_remaining_secs"] == 30
+    assert data["status"] == "degraded"
+    assert any("rate-limited" in w for w in data["warnings"])
+
+
+def test_health_with_rtt_not_rate_limited(tracker, inferrer, history_db):
+    """When RTT is healthy, no rate-limit warning."""
+    mock_rtt = MagicMock()
+    mock_rtt.rate_limit_info = {"active": False}
+    app = create_app(tracker, inferrer, history_db, rtt_client=mock_rtt)
+    client = TestClient(app)
+    data = client.get("/health").json()
+    assert data["rtt"]["rate_limited"] is False
+    assert not any("rate-limited" in w for w in data["warnings"])

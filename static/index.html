@@ -4,10 +4,16 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Roundstone Crossing</title>
-  <link rel="stylesheet" href="/static/style.css?v=7">
+  <link rel="stylesheet" href="/static/style.css?v=8">
 </head>
 <body>
   <h1>Roundstone Crossing</h1>
+
+  <div id="service-warning" class="service-warning tab-hidden">
+    <span class="warning-icon">⚠️</span>
+    <span id="warning-text"></span>
+    <button class="warning-dismiss" id="warning-dismiss">&times;</button>
+  </div>
 
   <div id="status-card" class="status-card unknown">
     <div class="status-icon" id="status-icon">⏳</div>
@@ -152,6 +158,6 @@
     </div>
   </div>
 
-  <script src="/static/app.js?v=6"></script>
+  <script src="/static/app.js?v=8"></script>
 </body>
 </html>

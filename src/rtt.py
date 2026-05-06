@@ -324,6 +324,19 @@ class RTTClient:
             dest_codes=dest_codes,
         )
 
+    @property
+    def rate_limit_info(self) -> dict:
+        """Expose current rate-limit state for health reporting."""
+        now = datetime.now(timezone.utc)
+        if self._retry_after and now < self._retry_after:
+            remaining = (self._retry_after - now).total_seconds()
+            return {
+                "active": True,
+                "until": self._retry_after.isoformat(),
+                "remaining_secs": round(remaining),
+            }
+        return {"active": False}
+
     def _handle_rate_limit(self, resp: requests.Response):
         """Handle 429 rate limit response."""
         retry_after = int(resp.headers.get("Retry-After", 60))

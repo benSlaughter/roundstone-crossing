@@ -137,6 +137,22 @@ class TestHandleRateLimit:
         diff = (rtt._retry_after - datetime.now(timezone.utc)).total_seconds()
         assert 58 <= diff <= 61
 
+    def test_rate_limit_info_when_active(self, rtt):
+        rtt._retry_after = datetime.now(timezone.utc) + timedelta(seconds=30)
+        info = rtt.rate_limit_info
+        assert info["active"] is True
+        assert 28 <= info["remaining_secs"] <= 31
+        assert "until" in info
+
+    def test_rate_limit_info_when_inactive(self, rtt):
+        info = rtt.rate_limit_info
+        assert info["active"] is False
+
+    def test_rate_limit_info_when_expired(self, rtt):
+        rtt._retry_after = datetime.now(timezone.utc) - timedelta(seconds=5)
+        info = rtt.rate_limit_info
+        assert info["active"] is False
+
     def test_backoff_prevents_polling(self, rtt):
         rtt._retry_after = datetime.now(timezone.utc) + timedelta(seconds=60)
         rtt._access_token = "valid"

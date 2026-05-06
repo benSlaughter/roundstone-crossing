@@ -441,6 +441,35 @@ async function updateUpcoming() {
   } catch (e) { /* ignore */ }
 }
 
+// Service health warnings
+let warningDismissed = false;
+let healthInterval = null;
+
+async function updateServiceWarnings() {
+  try {
+    const data = await fetchJSON('/health');
+    const banner = document.getElementById('service-warning');
+    const textEl = document.getElementById('warning-text');
+
+    if (!data.warnings || data.warnings.length === 0 || warningDismissed) {
+      banner.classList.add('tab-hidden');
+      if (data.warnings && data.warnings.length === 0) warningDismissed = false;
+      return;
+    }
+
+    textEl.textContent = data.warnings.join(' · ');
+    banner.classList.remove('tab-hidden');
+    banner.className = 'service-warning ' + (data.status === 'degraded' ? 'warn-degraded' : '');
+  } catch (e) { /* ignore — health endpoint itself may be down */ }
+}
+
+document.getElementById('warning-dismiss').addEventListener('click', () => {
+  warningDismissed = true;
+  document.getElementById('service-warning').classList.add('tab-hidden');
+});
+
+updateServiceWarnings();
+
 updateStatus();
 updateDiagram();
 updateRecentTrains();
@@ -454,6 +483,7 @@ function startPolling() {
     diagramInterval = setInterval(updateDiagram, 3000);
     historyInterval = setInterval(updateRecentTrains, 15000);
     trainInterval = setInterval(updateHistory, 15000);
+    healthInterval = setInterval(updateServiceWarnings, 30000);
 }
 
 function stopPolling() {
@@ -461,6 +491,7 @@ function stopPolling() {
     clearInterval(diagramInterval);
     clearInterval(historyInterval);
     clearInterval(trainInterval);
+    clearInterval(healthInterval);
 }
 
 document.addEventListener('visibilitychange', () => {
@@ -478,6 +509,7 @@ document.addEventListener('visibilitychange', () => {
         // Refresh immediately when tab becomes visible again
         updateStatus();
         updateDiagram();
+        updateServiceWarnings();
         startPolling();
         if (upcomingVisible) {
             updateUpcoming();
