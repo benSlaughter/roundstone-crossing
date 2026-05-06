@@ -39,7 +39,7 @@ def create_app(tracker: TrainTracker, inferrer: CrossingInferrer, history: Histo
     async def add_csp_header(request: Request, call_next):
         response = await call_next(request)
         response.headers["Content-Security-Policy"] = (
-            "default-src 'self'; style-src 'self'; "
+            "default-src 'self'; style-src 'self' 'unsafe-inline'; "
             "script-src 'self'; img-src 'self' data:; connect-src 'self'"
         )
         return response

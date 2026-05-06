@@ -323,10 +323,10 @@ async function updatePredictions() {
 
       const trains = w.trains.map(t => {
         const dir = t.direction === 'east' ? '↗' : '↙';
-        const dirColor = t.direction === 'east' ? '#60a5fa' : '#f472b6';
+        const dirClass = t.direction === 'east' ? 'dir-east' : 'dir-west';
         return `
           <div class="pred-train-row">
-            <span style="color:${dirColor}">${dir}</span>
+            <span class="${dirClass}">${dir}</span>
             <strong>${esc(t.headcode)}</strong>
             <span class="pred-eta">@ ${esc(t.crossing_eta)}</span>
             <span class="pred-route">${esc(t.origin)} → ${esc(t.destination)}</span>
@@ -414,7 +414,7 @@ async function updateUpcoming() {
     const data = await fetchJSON(`/next?station=${upcomingStation}&limit=8`);
     const body = document.getElementById('upcoming-body');
     if (!data.services || data.services.length === 0) {
-      body.innerHTML = '<tr><td colspan="7" style="color:#71717a">No upcoming services</td></tr>';
+      body.innerHTML = '<tr><td colspan="7" class="text-muted">No upcoming services</td></tr>';
       return;
     }
     body.innerHTML = data.services.map(s => {
@@ -427,8 +427,9 @@ async function updateUpcoming() {
       const statusText = s.status ? s.status.replace('_', ' ').toLowerCase() : '';
       const statusBadge = statusText ? `<span class="status-badge ${badgeClass}">${esc(statusText)}</span>` : '';
       const dirArrow = s.direction === 'east' ? '↗' : s.direction === 'west' ? '↙' : '';
+      const dirClass = s.direction === 'east' ? 'dir-east' : s.direction === 'west' ? 'dir-west' : '';
       return `<tr>
-        <td style="color:${s.direction === 'east' ? '#60a5fa' : '#f472b6'}">${dirArrow}</td>
+        <td class="${dirClass}">${dirArrow}</td>
         <td><strong>${esc(s.headcode)}</strong></td>
         <td>${arr}</td>
         <td>${dep}</td>

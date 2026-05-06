@@ -708,3 +708,7 @@ footer {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+.dir-east { color: #60a5fa; }
+.dir-west { color: #f472b6; }
+.text-muted { color: #71717a; }
