@@ -32,9 +32,12 @@ h1 {
   border: 1px solid #92400e;
   color: #fbbf24;
   font-size: 0.85rem;
-  display: flex;
+  display: none;
   align-items: center;
   gap: 0.5rem;
+}
+.service-warning.visible {
+  display: flex;
 }
 .service-warning .warning-icon { flex-shrink: 0; }
 .service-warning .warning-dismiss {

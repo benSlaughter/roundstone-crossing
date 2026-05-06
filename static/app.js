@@ -452,20 +452,19 @@ async function updateServiceWarnings() {
     const textEl = document.getElementById('warning-text');
 
     if (!data.warnings || data.warnings.length === 0 || warningDismissed) {
-      banner.classList.add('tab-hidden');
+      banner.classList.remove('visible');
       if (data.warnings && data.warnings.length === 0) warningDismissed = false;
       return;
     }
 
     textEl.textContent = data.warnings.join(' · ');
-    banner.classList.remove('tab-hidden');
-    banner.className = 'service-warning ' + (data.status === 'degraded' ? 'warn-degraded' : '');
+    banner.classList.add('visible');
   } catch (e) { /* ignore — health endpoint itself may be down */ }
 }
 
 document.getElementById('warning-dismiss').addEventListener('click', () => {
   warningDismissed = true;
-  document.getElementById('service-warning').classList.add('tab-hidden');
+  document.getElementById('service-warning').classList.remove('visible');
 });
 
 updateServiceWarnings();
