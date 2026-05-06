@@ -37,6 +37,7 @@ class RTTClient:
 
         # Rate limit backoff — shared across all requests
         self._retry_after: datetime | None = None
+        self._server_retry_after: datetime | None = None  # real server-requested wait
         self._consecutive_429s: int = 0
         self._last_success: datetime | None = None
 
@@ -168,6 +169,7 @@ class RTTClient:
             data = resp.json()
             self._cache[crs] = (data, now)
             self._consecutive_429s = 0
+            self._server_retry_after = None
             self._last_success = now
             return data
 
@@ -337,13 +339,19 @@ class RTTClient:
         """Expose current rate-limit state for health reporting."""
         now = datetime.now(timezone.utc)
 
+        # Use the server's real retry-after for display, not our capped backoff
+        server_remaining = 0
+        server_until = None
+        if self._server_retry_after and now < self._server_retry_after:
+            server_remaining = round((self._server_retry_after - now).total_seconds())
+            server_until = self._server_retry_after.isoformat()
+
         # Actively backing off
         if self._retry_after and now < self._retry_after:
-            remaining = (self._retry_after - now).total_seconds()
             return {
                 "active": True,
-                "until": self._retry_after.isoformat(),
-                "remaining_secs": round(remaining),
+                "until": server_until or self._retry_after.isoformat(),
+                "remaining_secs": server_remaining or round((self._retry_after - now).total_seconds()),
                 "consecutive_429s": self._consecutive_429s,
             }
 
@@ -351,8 +359,8 @@ class RTTClient:
         if self._consecutive_429s >= 2:
             return {
                 "active": True,
-                "until": None,
-                "remaining_secs": 0,
+                "until": server_until,
+                "remaining_secs": server_remaining,
                 "consecutive_429s": self._consecutive_429s,
             }
 
@@ -361,7 +369,8 @@ class RTTClient:
     def _handle_rate_limit(self, resp: requests.Response):
         """Handle 429 rate limit response. Cap backoff at 5 minutes to recover sooner."""
         raw_retry = int(resp.headers.get("Retry-After", 60))
-        capped = min(raw_retry, 300)  # cap at 5 minutes — re-check rather than blindly wait hours
+        capped = min(raw_retry, 300)  # retry sooner, but track the real wait
         self._retry_after = datetime.now(timezone.utc) + timedelta(seconds=capped)
+        self._server_retry_after = datetime.now(timezone.utc) + timedelta(seconds=raw_retry)
         self._consecutive_429s += 1
         logger.warning(f"RTT rate limited — server asked for {raw_retry}s, backing off {capped}s (streak: {self._consecutive_429s})")
