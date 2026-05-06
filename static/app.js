@@ -443,7 +443,9 @@ async function updateUpcoming() {
 
 // Service health warnings
 let warningDismissed = false;
+let warningDismissedAt = 0;
 let healthInterval = null;
+const DISMISS_DURATION_MS = 30 * 60 * 1000; // 30 minutes
 
 async function updateServiceWarnings() {
   try {
@@ -451,9 +453,20 @@ async function updateServiceWarnings() {
     const banner = document.getElementById('service-warning');
     const textEl = document.getElementById('warning-text');
 
-    if (!data.warnings || data.warnings.length === 0 || warningDismissed) {
+    // Auto-expire dismiss after 30 minutes
+    if (warningDismissed && Date.now() - warningDismissedAt > DISMISS_DURATION_MS) {
+      warningDismissed = false;
+    }
+
+    // Also reset dismiss when warnings change (new issue or all clear)
+    if (!data.warnings || data.warnings.length === 0) {
       banner.classList.remove('visible');
-      if (data.warnings && data.warnings.length === 0) warningDismissed = false;
+      warningDismissed = false;
+      return;
+    }
+
+    if (warningDismissed) {
+      banner.classList.remove('visible');
       return;
     }
 
@@ -464,6 +477,7 @@ async function updateServiceWarnings() {
 
 document.getElementById('warning-dismiss').addEventListener('click', () => {
   warningDismissed = true;
+  warningDismissedAt = Date.now();
   document.getElementById('service-warning').classList.remove('visible');
 });
 
