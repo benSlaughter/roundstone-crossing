@@ -338,7 +338,8 @@ class RTTClient:
         return {"active": False}
 
     def _handle_rate_limit(self, resp: requests.Response):
-        """Handle 429 rate limit response."""
-        retry_after = int(resp.headers.get("Retry-After", 60))
-        self._retry_after = datetime.now(timezone.utc) + timedelta(seconds=retry_after)
-        logger.warning(f"RTT rate limited — backing off {retry_after}s")
+        """Handle 429 rate limit response. Cap backoff at 5 minutes to recover sooner."""
+        raw_retry = int(resp.headers.get("Retry-After", 60))
+        capped = min(raw_retry, 300)  # cap at 5 minutes — re-check rather than blindly wait hours
+        self._retry_after = datetime.now(timezone.utc) + timedelta(seconds=capped)
+        logger.warning(f"RTT rate limited — server asked for {raw_retry}s, backing off {capped}s")
