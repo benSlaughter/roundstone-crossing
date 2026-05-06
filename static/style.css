@@ -299,11 +299,9 @@ footer {
 
 /* Legend (inside tab content) */
 .legend-panel {
-  display: none;
   font-size: 0.82rem;
   line-height: 1.7;
 }
-.legend-panel.visible { display: block; }
 .legend-panel dt {
   font-weight: 700;
   color: #e4e4e7;
@@ -531,10 +529,8 @@ footer {
 .track-train.phase-cleared { background: #1e3a5f; opacity: 0.6; }
 /* Upcoming trains panel */
 .upcoming-panel {
-  display: none;
   font-size: 0.75rem;
 }
-.upcoming-panel.visible { display: block; }
 .upcoming-panel h3 {
   margin: 0 0 0.5rem 0;
   font-size: 0.8rem;
@@ -623,7 +619,6 @@ footer {
 
 /* Predictions panel */
 .predictions-panel {
-  display: none;
   font-size: 0.82rem;
 }
 .pred-current {
