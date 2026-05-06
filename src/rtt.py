@@ -37,6 +37,8 @@ class RTTClient:
 
         # Rate limit backoff — shared across all requests
         self._retry_after: datetime | None = None
+        self._consecutive_429s: int = 0
+        self._last_success: datetime | None = None
 
         # Response cache: {crs: (data_dict, fetched_at)}
         self._cache: dict[str, tuple[dict, datetime]] = {}
@@ -165,6 +167,8 @@ class RTTClient:
             resp.raise_for_status()
             data = resp.json()
             self._cache[crs] = (data, now)
+            self._consecutive_429s = 0
+            self._last_success = now
             return data
 
         except Exception as e:
@@ -332,13 +336,26 @@ class RTTClient:
     def rate_limit_info(self) -> dict:
         """Expose current rate-limit state for health reporting."""
         now = datetime.now(timezone.utc)
+
+        # Actively backing off
         if self._retry_after and now < self._retry_after:
             remaining = (self._retry_after - now).total_seconds()
             return {
                 "active": True,
                 "until": self._retry_after.isoformat(),
                 "remaining_secs": round(remaining),
+                "consecutive_429s": self._consecutive_429s,
             }
+
+        # Between backoff windows but still repeatedly failing
+        if self._consecutive_429s >= 2:
+            return {
+                "active": True,
+                "until": None,
+                "remaining_secs": 0,
+                "consecutive_429s": self._consecutive_429s,
+            }
+
         return {"active": False}
 
     def _handle_rate_limit(self, resp: requests.Response):
@@ -346,4 +363,5 @@ class RTTClient:
         raw_retry = int(resp.headers.get("Retry-After", 60))
         capped = min(raw_retry, 300)  # cap at 5 minutes — re-check rather than blindly wait hours
         self._retry_after = datetime.now(timezone.utc) + timedelta(seconds=capped)
-        logger.warning(f"RTT rate limited — server asked for {raw_retry}s, backing off {capped}s")
+        self._consecutive_429s += 1
+        logger.warning(f"RTT rate limited — server asked for {raw_retry}s, backing off {capped}s (streak: {self._consecutive_429s})")

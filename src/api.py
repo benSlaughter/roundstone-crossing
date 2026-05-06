@@ -170,12 +170,19 @@ def create_app(tracker: TrainTracker, inferrer: CrossingInferrer, history: Histo
             warnings.append("Network Rail feed has not connected — no live data")
         if rtt_rate_limited:
             secs = rtt_info.get("rate_limited_remaining_secs", 0)
-            if secs >= 60:
-                mins = round(secs / 60)
-                time_str = f"~{mins} min" if mins < 60 else f"~{mins // 60}h {mins % 60}m"
+            streak = rtt_info.get("consecutive_429s", 0)
+            if secs > 0:
+                if secs >= 60:
+                    mins = round(secs / 60)
+                    time_str = f" for ~{mins} min" if mins < 60 else f" for ~{mins // 60}h {mins % 60}m"
+                else:
+                    time_str = f" for ~{secs}s"
             else:
-                time_str = f"~{secs}s"
-            warnings.append(f"Train schedule API is rate-limited — predictions may be unavailable for {time_str}")
+                time_str = ""
+            msg = f"Train schedule API is rate-limited{time_str} — predictions unavailable"
+            if streak > 2:
+                msg += f" (rejected {streak} times)"
+            warnings.append(msg)
         if rtt_client is None:
             warnings.append("Train schedule integration is not configured")
 
