@@ -1,0 +1,7 @@
+timestamp,event,precision,notes
+2026-05-05T08:34:40,open,second,arrived at crossing - gate open
+2026-05-05T08:34:55,closing,second,observed gate closing
+2026-05-05T08:36:40,train_east,second,train crossing eastbound
+2026-05-05T08:39:14,train_west,second,train crossing westbound
+2026-05-05T08:39:23,opening,second,observed gate opening
+2026-05-05T08:48:15,open,second,left crossing - gate open
