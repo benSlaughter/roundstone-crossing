@@ -569,3 +569,59 @@ def test_health_with_rtt_not_rate_limited(tracker, inferrer, history_db):
     data = client.get("/health").json()
     assert data["rtt"]["rate_limited"] is False
     assert not any("rate-limited" in w for w in data["warnings"])
+
+
+# ── Live debug view ──────────────────────────────────────────────────
+
+class TestLiveEndpoint:
+
+    def test_live_data_returns_all_sections(self, tracker, inferrer, history_db):
+        app = create_app(tracker, inferrer, history_db)
+        client = TestClient(app)
+        resp = client.get("/live/data")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "crossing" in data
+        assert "trains" in data
+        assert "routes" in data
+        assert "feed" in data
+        assert "berth_zones" in data
+        assert "timestamp" in data
+
+    def test_live_data_with_route_monitor(self, tracker, inferrer, history_db, test_config):
+        from src.route_monitor import RouteMonitor
+        rm = RouteMonitor(test_config)
+        app = create_app(tracker, inferrer, history_db, route_monitor=rm)
+        client = TestClient(app)
+        resp = client.get("/live/data")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert isinstance(data["routes"]["config"], list)
+        assert isinstance(data["routes"]["active"], list)
+
+    def test_live_data_without_route_monitor(self, tracker, inferrer, history_db):
+        app = create_app(tracker, inferrer, history_db)
+        client = TestClient(app)
+        data = client.get("/live/data").json()
+        assert data["routes"]["active"] == []
+        assert data["routes"]["config"] == []
+
+    def test_live_data_includes_train_details(self, tracker, inferrer, history_db):
+        from datetime import datetime, timezone
+        tracker.handle_td_step("", "0036", "1A23", datetime.now(timezone.utc))
+        app = create_app(tracker, inferrer, history_db)
+        client = TestClient(app)
+        data = client.get("/live/data").json()
+        assert len(data["trains"]) == 1
+        t = data["trains"][0]
+        assert t["headcode"] == "1A23"
+        assert "first_seen" in t
+        assert "predicted_at_crossing" in t
+        assert "is_stale" in t
+
+    def test_live_html_served(self, tracker, inferrer, history_db):
+        app = create_app(tracker, inferrer, history_db)
+        client = TestClient(app)
+        resp = client.get("/live")
+        assert resp.status_code == 200
+        assert "text/html" in resp.headers.get("content-type", "")

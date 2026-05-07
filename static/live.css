@@ -1,0 +1,442 @@
+/* Live debug view — dark theme matching main dashboard */
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  background: #0f1117;
+  color: #e4e4e7;
+  min-height: 100vh;
+  padding: 1rem;
+  max-width: 900px;
+  margin: 0 auto;
+}
+
+header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 1rem;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+h1 {
+  font-size: 1rem;
+  font-weight: 500;
+  color: #a1a1aa;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+.badge {
+  display: inline-block;
+  background: #dc2626;
+  color: #fff;
+  font-size: 0.55rem;
+  padding: 0.1rem 0.4rem;
+  border-radius: 0.25rem;
+  vertical-align: middle;
+  letter-spacing: 0.08em;
+  font-weight: 700;
+  animation: pulse-badge 2s ease-in-out infinite;
+}
+@keyframes pulse-badge {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+.header-meta {
+  font-size: 0.75rem;
+  color: #71717a;
+}
+.sep { margin: 0 0.3rem; color: #3f3f46; }
+
+.feed-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  vertical-align: middle;
+  margin-right: 0.2rem;
+}
+.feed-dot.connected { background: #22c55e; }
+.feed-dot.disconnected { background: #ef4444; }
+
+/* State banner */
+.state-banner {
+  padding: 0.6rem 1rem;
+  border-radius: 0.5rem;
+  margin-bottom: 1rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-weight: 600;
+  font-size: 0.9rem;
+  transition: background 0.3s;
+}
+.state-banner.open { background: #14532d; border: 1px solid #166534; }
+.state-banner.closing_predicted { background: #78350f; border: 1px solid #92400e; }
+.state-banner.closed_inferred { background: #7f1d1d; border: 1px solid #991b1b; }
+.state-banner.opening_predicted { background: #365314; border: 1px solid #4d7c0f; }
+.state-banner.stale_data, .state-banner.unknown { background: #27272a; border: 1px solid #3f3f46; }
+.state-conf {
+  margin-left: auto;
+  font-size: 0.75rem;
+  font-weight: 400;
+  color: #a1a1aa;
+}
+.state-since {
+  font-size: 0.7rem;
+  font-weight: 400;
+  color: #71717a;
+}
+
+/* Section panels */
+.panel {
+  background: #18181b;
+  border: 1px solid #27272a;
+  border-radius: 0.5rem;
+  padding: 0.75rem 1rem;
+  margin-bottom: 0.75rem;
+}
+.section-header {
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: #71717a;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 0.5rem;
+}
+.count-badge {
+  display: inline-block;
+  background: #27272a;
+  color: #a1a1aa;
+  font-size: 0.6rem;
+  padding: 0.05rem 0.35rem;
+  border-radius: 0.25rem;
+  margin-left: 0.3rem;
+  font-weight: 500;
+}
+.empty { color: #52525b; font-size: 0.8rem; font-style: italic; }
+
+/* Track diagram — expanded version */
+.diagram-section {
+  background: #18181b;
+  border: 1px solid #27272a;
+  border-radius: 0.5rem;
+  padding: 0.75rem 1rem;
+  margin-bottom: 0.75rem;
+}
+.track-diagram {
+  position: relative;
+  height: 140px;
+  margin-top: 0.5rem;
+}
+.track-line {
+  position: absolute;
+  height: 3px;
+  background: #3f3f46;
+  left: 0; right: 0;
+  z-index: 1;
+}
+.line-up { top: 45px; }
+.line-down { top: 95px; }
+.track-label {
+  position: absolute;
+  font-size: 0.5rem;
+  color: #52525b;
+  z-index: 3;
+  font-family: "SF Mono", "Fira Code", monospace;
+}
+.label-up { top: 33px; right: 4px; }
+.label-down { top: 100px; left: 4px; }
+
+/* Stations on diagram */
+.dia-station {
+  position: absolute;
+  top: 26px;
+  width: 50px;
+  height: 88px;
+  border: 1px dashed #3f3f46;
+  border-radius: 3px;
+  background: rgba(28, 25, 23, 0.85);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2;
+  transform: translateX(-50%);
+}
+.sta-ang { left: 17%; }
+.sta-gbs { left: 83%; }
+.sta-name {
+  font-size: 0.55rem;
+  font-weight: 700;
+  color: #a1a1aa;
+  text-transform: uppercase;
+}
+
+/* Crossing on diagram */
+.dia-crossing {
+  position: absolute;
+  left: 32%;
+  top: 0; bottom: 0;
+  width: 26px;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  z-index: 4;
+}
+.dia-crossing-road {
+  position: absolute;
+  top: 30px; bottom: 24px;
+  width: 8px;
+  background: repeating-linear-gradient(180deg, #44403c 0px, #44403c 3px, transparent 3px, transparent 6px);
+  border-radius: 2px;
+  opacity: 0.5;
+}
+.dia-crossing-light {
+  width: 16px; height: 16px;
+  border-radius: 50%;
+  border: 2px solid #27272a;
+  z-index: 5;
+  transition: background 0.5s, box-shadow 0.5s;
+}
+.dia-crossing-light.open { background: #22c55e; box-shadow: 0 0 6px #22c55e88; }
+.dia-crossing-light.closed_inferred { background: #ef4444; box-shadow: 0 0 6px #ef444488; }
+.dia-crossing-light.closing_predicted { background: #f97316; box-shadow: 0 0 6px #f9731688; }
+.dia-crossing-light.opening_predicted { background: #84cc16; box-shadow: 0 0 6px #84cc1688; }
+.dia-crossing-light.unknown, .dia-crossing-light.stale_data { background: #52525b; }
+.dia-crossing-label {
+  font-size: 0.45rem;
+  color: #71717a;
+  text-transform: uppercase;
+  margin-top: 2px;
+  z-index: 5;
+}
+
+/* Berth ticks on diagram */
+.dia-berth-tick {
+  position: absolute;
+  width: 1px;
+  height: 6px;
+  background: #52525b;
+  z-index: 2;
+  transform: translateX(-50%);
+}
+.dia-berth-tick.up { top: 42px; }
+.dia-berth-tick.down { top: 96px; }
+.dia-berth-label {
+  position: absolute;
+  font-size: 0.4rem;
+  color: #52525b;
+  font-family: "SF Mono", "Fira Code", monospace;
+  transform: translateX(-50%);
+  z-index: 2;
+}
+.dia-berth-label.up { top: 51px; }
+.dia-berth-label.down { top: 84px; }
+
+/* Berth zone overlays */
+.dia-zone {
+  position: absolute;
+  height: 10px;
+  border-radius: 2px;
+  opacity: 0.25;
+  z-index: 1;
+}
+.dia-zone.up { top: 40px; }
+.dia-zone.down { top: 91px; }
+.dia-zone.zone-approach { background: #92400e; }
+.dia-zone.zone-strike_in { background: #dc2626; }
+.dia-zone.zone-at_crossing { background: #ef4444; }
+.dia-zone.zone-clear { background: #3b82f6; }
+
+/* Train markers on diagram */
+.dia-train {
+  position: absolute;
+  height: 16px;
+  border-radius: 3px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: "SF Mono", "Fira Code", monospace;
+  font-size: 0.55rem;
+  font-weight: 700;
+  color: #fff;
+  z-index: 6;
+  padding: 0 3px;
+  min-width: 34px;
+  transform: translateX(-50%);
+  transition: left 1s ease;
+  white-space: nowrap;
+}
+.dia-train.up { top: 36px; }
+.dia-train.down { top: 86px; }
+.dia-train.phase-approaching { background: #92400e; }
+.dia-train.phase-strike_in { background: #991b1b; }
+.dia-train.phase-at_crossing { background: #dc2626; }
+.dia-train.phase-at_station { background: #4d7c0f; }
+.dia-train.phase-cleared { background: #1e3a5f; opacity: 0.6; }
+.dia-train.phase-lost { background: #52525b; opacity: 0.4; }
+
+/* Route grid */
+.route-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(90px, 1fr));
+  gap: 0.35rem;
+}
+.route-chip {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.25rem 0.4rem;
+  border-radius: 0.25rem;
+  font-family: "SF Mono", "Fira Code", monospace;
+  font-size: 0.7rem;
+  font-weight: 600;
+  border: 1px solid #27272a;
+  background: #1c1917;
+}
+.route-chip.active {
+  border-color: #dc2626;
+  background: #450a0a;
+  color: #fca5a5;
+}
+.route-chip.inactive {
+  color: #52525b;
+}
+.route-dot {
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.route-chip.active .route-dot { background: #ef4444; box-shadow: 0 0 4px #ef444488; }
+.route-chip.inactive .route-dot { background: #3f3f46; }
+.route-side {
+  font-size: 0.5rem;
+  font-weight: 400;
+  color: #71717a;
+  margin-left: auto;
+}
+.route-held {
+  font-size: 0.5rem;
+  font-weight: 400;
+  color: #a1a1aa;
+}
+
+/* Data tables */
+.table-wrap { overflow-x: auto; }
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.75rem;
+}
+.data-table th {
+  text-align: left;
+  font-size: 0.6rem;
+  font-weight: 600;
+  color: #71717a;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 0.3rem 0.5rem;
+  border-bottom: 1px solid #27272a;
+}
+.data-table td {
+  padding: 0.3rem 0.5rem;
+  border-bottom: 1px solid #1e1e22;
+  font-family: "SF Mono", "Fira Code", monospace;
+  font-size: 0.7rem;
+}
+.data-table tr:hover td { background: #1c1917; }
+
+/* Phase badges in table */
+.phase-pill {
+  display: inline-block;
+  padding: 0.1rem 0.3rem;
+  border-radius: 0.2rem;
+  font-size: 0.6rem;
+  font-weight: 600;
+}
+.phase-pill.approaching { background: #92400e; color: #fed7aa; }
+.phase-pill.strike_in { background: #991b1b; color: #fecaca; }
+.phase-pill.at_crossing { background: #dc2626; color: #fff; }
+.phase-pill.at_station { background: #4d7c0f; color: #d9f99d; }
+.phase-pill.cleared { background: #1e3a5f; color: #93c5fd; }
+.phase-pill.lost { background: #3f3f46; color: #a1a1aa; }
+
+.stale-row td { opacity: 0.4; }
+
+/* Direction in table */
+.dir-east { color: #60a5fa; }
+.dir-west { color: #f472b6; }
+
+/* Zone grid */
+.zone-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 0.35rem;
+}
+.zone-card {
+  padding: 0.35rem 0.5rem;
+  border-radius: 0.25rem;
+  border: 1px solid #27272a;
+  background: #1c1917;
+}
+.zone-card-title {
+  font-size: 0.55rem;
+  font-weight: 600;
+  color: #71717a;
+  text-transform: uppercase;
+  margin-bottom: 0.2rem;
+}
+.zone-berth {
+  font-family: "SF Mono", "Fira Code", monospace;
+  font-size: 0.65rem;
+  color: #a1a1aa;
+}
+.zone-berth .zone-dir {
+  font-size: 0.5rem;
+  color: #52525b;
+}
+
+/* Raw JSON */
+.collapsible {
+  cursor: pointer;
+  user-select: none;
+}
+.collapsible:hover { color: #a1a1aa; }
+.toggle-arrow { font-size: 0.6rem; }
+.raw-json {
+  background: #0a0a0c;
+  border: 1px solid #27272a;
+  border-radius: 0.25rem;
+  padding: 0.5rem;
+  font-size: 0.6rem;
+  font-family: "SF Mono", "Fira Code", monospace;
+  color: #71717a;
+  overflow-x: auto;
+  max-height: 400px;
+  white-space: pre-wrap;
+  word-break: break-all;
+  margin-top: 0.5rem;
+}
+.raw-json.collapsed { display: none; }
+
+/* Footer */
+footer {
+  text-align: center;
+  padding: 1rem 0;
+  font-size: 0.7rem;
+  color: #52525b;
+}
+footer a {
+  color: #71717a;
+  text-decoration: none;
+}
+footer a:hover { color: #a1a1aa; }
+
+/* Responsive */
+@media (max-width: 600px) {
+  body { padding: 0.5rem; }
+  .zone-grid { grid-template-columns: repeat(2, 1fr); }
+  .route-grid { grid-template-columns: repeat(auto-fill, minmax(80px, 1fr)); }
+}

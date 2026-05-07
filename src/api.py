@@ -32,7 +32,7 @@ def _parse_rtt_time(iso_str: str) -> datetime:
 
 
 def create_app(tracker: TrainTracker, inferrer: CrossingInferrer, history: HistoryLogger,
-               rtt_client=None) -> FastAPI:
+               rtt_client=None, route_monitor=None) -> FastAPI:
     app = FastAPI(title="Roundstone Crossing Predictor")
 
     @app.middleware("http")
@@ -540,6 +540,113 @@ def create_app(tracker: TrainTracker, inferrer: CrossingInferrer, history: Histo
                            _=Depends(_check_admin)):
         """Retrieve feedback submissions."""
         return {"feedback": history.get_feedback(limit=limit)}
+
+    # ── Live debug view (hidden) ─────────────────────────────────────
+
+    @app.get("/live")
+    async def live_view():
+        """Serve the live debug/advanced view page."""
+        return FileResponse(STATIC_DIR / "live.html")
+
+    @app.get("/live/data")
+    async def live_data():
+        """All raw technical data for the live debug view.
+
+        Returns trains, routes, berths, crossing state, feed health — everything
+        the system knows, in one payload. Not linked from the main UI.
+        """
+        from .models import TrainPhase
+        now = datetime.now(timezone.utc)
+
+        # All tracked trains (including cleared/lost, for debug)
+        with tracker._lock:
+            trains_snapshot = dict(tracker.trains)
+        trains = []
+        for hc, t in trains_snapshot.items():
+            trains.append({
+                "headcode": t.headcode,
+                "train_id": t.train_id,
+                "direction": t.direction.value if t.direction else None,
+                "phase": t.phase.value,
+                "last_berth": t.last_berth,
+                "last_berth_time": t.last_berth_time.isoformat() if t.last_berth_time else None,
+                "station": t.station,
+                "sub_position": t.sub_position,
+                "confidence": round(t.confidence, 2),
+                "age_secs": round(t.age_secs),
+                "first_seen": t.first_seen.isoformat(),
+                "last_update": t.last_update.isoformat(),
+                "predicted_at_crossing": t.predicted_at_crossing.isoformat() if t.predicted_at_crossing else None,
+                "is_stale": t.is_stale,
+            })
+
+        # Route state
+        routes = []
+        if route_monitor:
+            for ri in route_monitor.active_routes():
+                routes.append({
+                    "name": ri.name,
+                    "side": ri.side,
+                    "set_since": ri.set_since.isoformat() if ri.set_since else None,
+                    "held_secs": round((now - ri.set_since).total_seconds()) if ri.set_since else None,
+                })
+
+        # Crossing state
+        status_data = inferrer.status.to_dict()
+        status_data["since_secs"] = round((now - inferrer.status.since).total_seconds())
+
+        # Feed health
+        feed_time = inferrer.status.last_feed_message
+        feed_age = round((now - feed_time).total_seconds()) if feed_time else None
+
+        # Berth zone config (so the UI knows the zones)
+        td_config = tracker.config.get("td", {})
+        berth_zones = {
+            "approach": {
+                "up": list(td_config.get("approach_berths", {}).get("up", [])),
+                "down": list(td_config.get("approach_berths", {}).get("down", [])),
+            },
+            "strike_in": {
+                "up": list(td_config.get("strike_in_berths", {}).get("up", [])),
+                "down": list(td_config.get("strike_in_berths", {}).get("down", [])),
+            },
+            "at_crossing": {
+                "up": list(td_config.get("at_crossing_berths", {}).get("up", [])),
+                "down": list(td_config.get("at_crossing_berths", {}).get("down", [])),
+            },
+            "clear": {
+                "up": list(td_config.get("clear_berths", {}).get("up", [])),
+                "down": list(td_config.get("clear_berths", {}).get("down", [])),
+            },
+        }
+
+        # Route config
+        route_config = []
+        if route_monitor:
+            for (addr, bit), (name, side) in route_monitor._route_map.items():
+                route_config.append({
+                    "address": f"{addr:02X}",
+                    "bit": bit,
+                    "name": name,
+                    "side": side,
+                    "active": name in {r["name"] for r in routes},
+                })
+
+        return {
+            "timestamp": now.isoformat(),
+            "crossing": status_data,
+            "trains": trains,
+            "routes": {
+                "active": routes,
+                "config": sorted(route_config, key=lambda r: (r["address"], r["bit"])),
+            },
+            "feed": {
+                "last_message": feed_time.isoformat() if feed_time else None,
+                "age_secs": feed_age,
+                "connected": feed_age is not None and feed_age < 300,
+            },
+            "berth_zones": berth_zones,
+        }
 
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 

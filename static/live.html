@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Roundstone Crossing — Live View</title>
+  <link rel="stylesheet" href="/static/live.css?v=1">
+</head>
+<body>
+  <header>
+    <h1>Roundstone Crossing <span class="badge">LIVE</span></h1>
+    <div class="header-meta">
+      <span id="feed-status" class="feed-dot disconnected"></span>
+      <span id="feed-text">Connecting…</span>
+      <span class="sep">·</span>
+      <span id="update-time">—</span>
+    </div>
+  </header>
+
+  <!-- Crossing state banner -->
+  <div id="state-banner" class="state-banner unknown">
+    <span id="state-icon">❓</span>
+    <span id="state-label">Unknown</span>
+    <span id="state-confidence" class="state-conf">—</span>
+    <span id="state-since" class="state-since"></span>
+  </div>
+
+  <!-- Track diagram (expanded, always shows berths) -->
+  <section class="diagram-section">
+    <div class="section-header">Track Diagram</div>
+    <div class="track-diagram" id="track-diagram">
+      <!-- Track lines -->
+      <div class="track-line line-up"></div>
+      <div class="track-line line-down"></div>
+      <div class="track-label label-up">P1 (Up / East →)</div>
+      <div class="track-label label-down">P2 (Down / ← West)</div>
+
+      <!-- Stations -->
+      <div class="dia-station sta-ang">
+        <div class="sta-name">ANG</div>
+      </div>
+      <div class="dia-station sta-gbs">
+        <div class="sta-name">GBS</div>
+      </div>
+
+      <!-- Crossing -->
+      <div class="dia-crossing" id="dia-crossing">
+        <div class="dia-crossing-road"></div>
+        <div class="dia-crossing-light unknown" id="dia-crossing-light"></div>
+        <div class="dia-crossing-label">LX</div>
+      </div>
+
+      <!-- Berth zones rendered by JS -->
+      <!-- Train markers rendered by JS -->
+      <!-- Berth tick marks rendered by JS -->
+    </div>
+  </section>
+
+  <!-- Route state panel -->
+  <section class="panel">
+    <div class="section-header">Routes <span id="route-count" class="count-badge">0</span></div>
+    <div class="route-grid" id="route-grid">
+      <div class="empty">No route data yet</div>
+    </div>
+  </section>
+
+  <!-- All trains table -->
+  <section class="panel">
+    <div class="section-header">All Tracked Trains <span id="train-count" class="count-badge">0</span></div>
+    <div class="table-wrap">
+      <table class="data-table" id="trains-table">
+        <thead>
+          <tr>
+            <th>HC</th>
+            <th>Dir</th>
+            <th>Phase</th>
+            <th>Berth</th>
+            <th>Station</th>
+            <th>Conf</th>
+            <th>Age</th>
+            <th>ETA</th>
+          </tr>
+        </thead>
+        <tbody id="trains-body">
+          <tr><td colspan="8" class="empty">No trains</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- Berth zones -->
+  <section class="panel">
+    <div class="section-header">Berth Zones</div>
+    <div class="zone-grid" id="zone-grid"></div>
+  </section>
+
+  <!-- Raw JSON (collapsible) -->
+  <section class="panel">
+    <div class="section-header collapsible" id="raw-toggle">
+      Raw Data <span class="toggle-arrow">▸</span>
+    </div>
+    <pre class="raw-json collapsed" id="raw-json"></pre>
+  </section>
+
+  <footer>
+    <a href="/">← Dashboard</a>
+    <span class="sep">·</span>
+    <span>Polling every 2s</span>
+  </footer>
+
+  <script src="/static/live.js?v=1"></script>
+</body>
+</html>
