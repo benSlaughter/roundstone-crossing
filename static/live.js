@@ -240,7 +240,7 @@ function updateTrains(trains) {
         <td class="${dirClass}">${dirLabel}</td>
         <td><span class="phase-pill ${esc(t.phase)}">${esc(t.phase)}</span></td>
         <td>${esc(t.last_berth || '—')}</td>
-        <td>${esc(t.station || '—')}</td>
+        <td>${t.station ? esc(t.station) + (t.sub_position === 'at_platform' ? ' 🚏' : '') : '—'}</td>
         <td>${t.confidence}</td>
         <td>${formatDuration(t.age_secs)}</td>
         <td>${eta}</td>
