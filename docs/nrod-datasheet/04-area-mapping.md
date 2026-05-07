@@ -43,12 +43,12 @@ In area LA, berths use 4-digit numeric codes with leading zeros. The tracks are 
                 EAST (towards Brighton)                    WEST (towards Littlehampton)
                 ◄────────────────────────────────────────────────────────────────►
 
-Up line     ...0031 ── 0033 ── 0035 ── 0037 ──╌╌╌╌╌╌╌── 0039 ── 0041...
-(odd,                                          ╳               
-eastbound)                                  CROSSING            
-                                               ╳               
-Down line   ...0030 ── 0032 ── 0034 ── 0036 ──╌╌╌╌╌╌╌── 0038 ── 0040 ── 0042...
-(even,
+Up line     ...0030 ── 0032 ── 0034 ── 0036 ──╌╌╌╌╌╌╌── 0038 ── 0040 ── 0042...
+(even,                                         ╳
+eastbound)                                  CROSSING
+                                               ╳
+Down line   ...0031 ── 0033 ── 0035 ── 0037 ──╌╌╌╌╌╌╌── 0039 ── 0041 ── A027...
+(odd,
 westbound)
 ```
 
@@ -56,47 +56,54 @@ westbound)
 
 | Berth Numbers | Track | Direction | Railway Term |
 |---------------|-------|-----------|-------------|
-| Even (0036, 0038, 0040...) | Down line | Westbound (→ Littlehampton) | Down |
-| Odd (0037, 0039, 0041...) | Up line | Eastbound (→ Brighton) | Up |
+| Even (0030, 0032, 0034...) | Up line | Eastbound (→ Brighton) | Up |
+| Odd (0031, 0033, 0035...) | Down line | Westbound (→ Littlehampton) | Down |
 
-> ⚠️ **Confidence: HIGH.** Verified across 50+ train journeys by matching headcodes against known timetable directions.
+> ⚠️ **Confidence: HIGH.** Verified against the TD area diagram (`docs/wiki-pages/TD_Map_LA.png`) and 600+ logged train events with inferred directions. Note that the parity-to-direction mapping is the **opposite** of what an earlier revision of this document claimed.
 
 ### Train Direction from Berth Sequence
 
-A westbound train steps through **decreasing** even berth numbers:
+An eastbound train steps through **decreasing** even berth numbers:
 ```
 0042 → 0040 → 0038 → [CROSSING] → 0036 → 0034 → 0032 → 0030
 ```
 
-An eastbound train steps through **increasing** odd berth numbers:
+A westbound train steps through **increasing** odd berth numbers (continuing into A-prefixed berths past Angmering P2):
 ```
-0031 → 0033 → 0035 → 0037 → [CROSSING] → 0039 → 0041
+0031 → 0033 → 0035 → 0037 → 0039 → [CROSSING] → 0041 → A027 → A029 → A031
 ```
 
 ---
 
 ## Roundstone Level Crossing Location
 
-The crossing sits between berths **0036/0037** (east side) and **0038/0039** (west side).
+The crossing sits between berths **0036/0039** (east side) and **0038/0041** (west side). In railway terms:
+- **Eastbound:** the crossing is just past signal 38, at the western start of berth `0036`
+- **Westbound:** the crossing is just past signal 39, at the eastern start of berth `0041`
 
 ```
                         ┌─── Roundstone Level Crossing
                         │
                         ▼
-    ...0035 ── 0037 ──╌╌╳╌╌── 0039 ── 0041...    Up (eastbound)
-    ...0034 ── 0036 ──╌╌╳╌╌── 0038 ── 0040...    Down (westbound)
+    ...0034 ── 0036 ──╌╌╳╌╌── 0038 ── 0040...    Up (eastbound, even)
+    ...0035 ── 0037 ──╌╌╳╌╌── 0039 ── 0041...    Down (westbound, odd)
 ```
 
 **Key berths for crossing prediction:**
 
 | Berth | Meaning |
 |-------|---------|
-| `0040` | Westbound train 2 berths from crossing |
-| `0038` | Westbound train about to cross / on crossing |
-| `0036` | Westbound train has just passed crossing |
-| `0035` | Eastbound train 2 berths from crossing |
-| `0037` | Eastbound train about to cross / on crossing |
-| `0039` | Eastbound train has just passed crossing |
+| `0042` | Eastbound train at western edge of area LA (approach) |
+| `0040` | Eastbound train at Angmering P1 (strike-in) |
+| `0038` | Eastbound train approaching crossing, just before signal 38 (strike-in) |
+| `0036` | Eastbound train at the crossing (just past signal 38) |
+| `0034` | Eastbound train has passed crossing, heading towards Goring (cleared) |
+| `0033` | Westbound train at eastern edge of area LA (approach) |
+| `0035` | Westbound train at Goring P2 (strike-in) |
+| `0037` | Westbound train approaching crossing (strike-in) |
+| `0039` | Westbound train approaching crossing, just before signal 39 (strike-in) |
+| `0041` | Westbound train at the crossing (just past signal 39, also Angmering P2) |
+| `A027` | Westbound train past Angmering P2, departed westward (cleared) |
 
 ---
 

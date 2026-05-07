@@ -41,7 +41,7 @@ td:
   #   Berth 0041 is long — it covers both the crossing AND Angmering P2 platform.
   #
   approach_berths:
-    up: ["A027"]                        # Beyond Angmering west (heading east towards crossing)
+    up: ["0042"]                        # West of Angmering P1 (heading east towards crossing)
     down: ["0033"]                      # Far east of Goring (heading west towards crossing)
 
   strike_in_berths:
@@ -54,7 +54,7 @@ td:
 
   clear_berths:
     up: ["0034"]                        # Past crossing, approaching Goring P1
-    down: ["A027"]                      # Past crossing + Angmering P2, departed westward
+    down: ["A027"]                      # Past Angmering P2, departed westward (down line only)
 
 # Timing model — initial heuristics, refined by observed data
 timing:

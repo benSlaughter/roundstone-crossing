@@ -12,17 +12,17 @@ from src.models import TrackedTrain, TrainPhase, Direction
 
 class TestHandleTdStep:
     def test_new_train_created(self, tracker, now):
-        tracker.handle_td_step("", "A027", "1A23", now)
+        tracker.handle_td_step("", "0042", "1A23", now)
         assert "1A23" in tracker.trains
         t = tracker.trains["1A23"]
         assert t.headcode == "1A23"
-        assert t.last_berth == "A027"
+        assert t.last_berth == "0042"
 
     def test_phase_progresses_up(self, tracker, now):
-        tracker.handle_td_step("", "A027", "1A23", now)
+        tracker.handle_td_step("", "0042", "1A23", now)
         assert tracker.trains["1A23"].phase == TrainPhase.APPROACHING
 
-        tracker.handle_td_step("A027", "0040", "1A23", now + timedelta(seconds=10))
+        tracker.handle_td_step("0042", "0040", "1A23", now + timedelta(seconds=10))
         assert tracker.trains["1A23"].phase == TrainPhase.STRIKE_IN
 
         tracker.handle_td_step("0040", "0036", "1A23", now + timedelta(seconds=20))
@@ -45,28 +45,30 @@ class TestHandleTdStep:
         assert tracker.trains["2B45"].phase == TrainPhase.CLEARED
 
     def test_direction_inferred_from_berth(self, tracker, now):
-        tracker.handle_td_step("", "A027", "1A23", now)
+        tracker.handle_td_step("", "0042", "1A23", now)
         assert tracker.trains["1A23"].direction == Direction.UP
 
         tracker.handle_td_step("", "0033", "2B45", now)
         assert tracker.trains["2B45"].direction == Direction.DOWN
 
+        # A027 is westbound-only (down/clear) — see TD_Map_LA.png
+        tracker.handle_td_step("", "A027", "1H99", now)
+        assert tracker.trains["1H99"].direction == Direction.DOWN
+
     def test_phase_regression_prevented(self, tracker, now):
+        # An eastbound train at 0036 (at_crossing) must not regress to 0042 (approach)
         tracker.handle_td_step("", "0036", "1A23", now)
         assert tracker.trains["1A23"].phase == TrainPhase.AT_CROSSING
 
-        tracker.handle_td_step("0036", "A027", "1A23", now + timedelta(seconds=10))
-        # A027 is up/approach — that would be a regression from AT_CROSSING
-        # But also A027 is down/clear which would be a progression
-        # The preferred direction is UP (already set), so it resolves to APPROACHING/UP
-        # which is blocked as regression — phase stays AT_CROSSING
+        tracker.handle_td_step("0036", "0042", "1A23", now + timedelta(seconds=10))
+        # 0042 is up/approach — that would be a regression from AT_CROSSING — phase stays AT_CROSSING
         assert tracker.trains["1A23"].phase == TrainPhase.AT_CROSSING
 
     def test_blank_headcode_ignored(self, tracker, now):
-        tracker.handle_td_step("", "A027", "", now)
+        tracker.handle_td_step("", "0042", "", now)
         assert len(tracker.trains) == 0
 
-        tracker.handle_td_step("", "A027", "  ", now)
+        tracker.handle_td_step("", "0042", "  ", now)
         assert len(tracker.trains) == 0
 
     def test_irrelevant_berths_ignored(self, tracker, now):
@@ -91,21 +93,21 @@ class TestHandleTdStep:
 
 class TestHandleTdCancel:
     def test_train_marked_lost(self, tracker, now):
-        tracker.handle_td_step("", "A027", "1A23", now)
-        tracker.handle_td_cancel("A027", "1A23", now + timedelta(seconds=5))
+        tracker.handle_td_step("", "0042", "1A23", now)
+        tracker.handle_td_cancel("0042", "1A23", now + timedelta(seconds=5))
         assert tracker.trains["1A23"].phase == TrainPhase.LOST
 
     def test_no_effect_if_berth_mismatch(self, tracker, now):
-        tracker.handle_td_step("", "A027", "1A23", now)
+        tracker.handle_td_step("", "0042", "1A23", now)
         tracker.handle_td_cancel("0036", "1A23", now + timedelta(seconds=5))
         assert tracker.trains["1A23"].phase == TrainPhase.APPROACHING
 
     def test_no_effect_for_unknown_headcode(self, tracker, now):
-        tracker.handle_td_cancel("A027", "XXXX", now)
+        tracker.handle_td_cancel("0042", "XXXX", now)
         assert "XXXX" not in tracker.trains
 
     def test_irrelevant_berths_ignored(self, tracker, now):
-        tracker.handle_td_step("", "A027", "1A23", now)
+        tracker.handle_td_step("", "0042", "1A23", now)
         tracker.handle_td_cancel("ZZZZ", "1A23", now + timedelta(seconds=5))
         assert tracker.trains["1A23"].phase == TrainPhase.APPROACHING
 
@@ -139,7 +141,7 @@ class TestHandleTrustMovement:
         assert tracker.trains["2B45"].phase == TrainPhase.CLEARED
 
     def test_at_station_sets_direction_and_station(self, tracker, now):
-        tracker.handle_td_step("", "A027", "1A23", now)
+        tracker.handle_td_step("", "0042", "1A23", now)
         tracker.handle_trust_movement("AB1A23CD00", "87998", "ARRIVAL", now + timedelta(seconds=10), headcode="1A23")
         t = tracker.trains["1A23"]
         assert t.direction == Direction.UP
@@ -202,20 +204,24 @@ class TestHandleRttUpdate:
 # ─── _classify_berth ─────────────────────────────────────────────────────────
 
 class TestClassifyBerth:
-    def test_shared_berth_up_preferred(self, tracker):
-        phase, direction = tracker._classify_berth("A027", preferred_direction=Direction.UP)
+    def test_preferred_direction_honoured(self, tracker):
+        # No berths are currently shared, but `preferred_direction` is honoured
+        # first as defensive behaviour. Verify it is at least passed through
+        # cleanly: a known up berth still resolves correctly when up is preferred.
+        phase, direction = tracker._classify_berth("0042", preferred_direction=Direction.UP)
         assert phase == TrainPhase.APPROACHING
         assert direction == Direction.UP
 
-    def test_shared_berth_down_preferred(self, tracker):
-        phase, direction = tracker._classify_berth("A027", preferred_direction=Direction.DOWN)
+    def test_approach_up(self, tracker):
+        phase, direction = tracker._classify_berth("0042")
+        assert phase == TrainPhase.APPROACHING
+        assert direction == Direction.UP
+
+    def test_clear_down_a027(self, tracker):
+        # A027 is westbound-only — see TD_Map_LA.png
+        phase, direction = tracker._classify_berth("A027")
         assert phase == TrainPhase.CLEARED
         assert direction == Direction.DOWN
-
-    def test_approach_up(self, tracker):
-        phase, direction = tracker._classify_berth("A027")
-        assert phase is not None
-        assert direction is not None
 
     def test_strike_in_up(self, tracker):
         phase, direction = tracker._classify_berth("0040")
@@ -257,7 +263,7 @@ class TestClassifyBerth:
 
 class TestGetActiveTrainsAndCleanup:
     def test_filters_out_cleared_and_lost(self, tracker, now):
-        tracker.handle_td_step("", "A027", "1A23", now)
+        tracker.handle_td_step("", "0042", "1A23", now)
         tracker.handle_td_step("", "0034", "2B45", now)  # cleared
         with freeze_time(now + timedelta(seconds=1)):
             active = tracker.get_active_trains()
@@ -266,7 +272,7 @@ class TestGetActiveTrainsAndCleanup:
         assert "2B45" not in headcodes
 
     def test_stale_trains_marked_lost(self, tracker, now):
-        tracker.handle_td_step("", "A027", "1A23", now)
+        tracker.handle_td_step("", "0042", "1A23", now)
         # Clear the predicted time so the train is genuinely stale
         tracker.trains["1A23"].predicted_at_crossing = None
         with freeze_time(now + timedelta(seconds=130)):
@@ -276,7 +282,7 @@ class TestGetActiveTrainsAndCleanup:
 
     def test_stale_train_kept_if_prediction_in_future(self, tracker, now):
         """Train with a future predicted_at_crossing is not marked lost even if stale."""
-        tracker.handle_td_step("", "A027", "1A23", now)
+        tracker.handle_td_step("", "0042", "1A23", now)
         tracker.trains["1A23"].predicted_at_crossing = now + timedelta(seconds=180)
         with freeze_time(now + timedelta(seconds=130)):
             active = tracker.get_active_trains()
@@ -285,7 +291,7 @@ class TestGetActiveTrainsAndCleanup:
 
     def test_stale_train_kept_within_grace_period(self, tracker, now):
         """Train kept active if predicted_at_crossing is in the recent past (grace period)."""
-        tracker.handle_td_step("", "A027", "1A23", now)
+        tracker.handle_td_step("", "0042", "1A23", now)
         # Prediction was for now+120s, check at now+150s (30s past prediction, within 60s grace)
         tracker.trains["1A23"].predicted_at_crossing = now + timedelta(seconds=120)
         with freeze_time(now + timedelta(seconds=150)):
@@ -301,8 +307,8 @@ class TestGetActiveTrainsAndCleanup:
         assert "1A23" not in tracker.trains
 
     def test_old_lost_trains_removed(self, tracker, now):
-        tracker.handle_td_step("", "A027", "1A23", now)
-        tracker.handle_td_cancel("A027", "1A23", now)
+        tracker.handle_td_step("", "0042", "1A23", now)
+        tracker.handle_td_cancel("0042", "1A23", now)
         assert tracker.trains["1A23"].phase == TrainPhase.LOST
         with freeze_time(now + timedelta(seconds=200)):
             tracker.get_active_trains()

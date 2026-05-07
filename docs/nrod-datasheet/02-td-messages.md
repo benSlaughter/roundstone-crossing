@@ -47,10 +47,10 @@ Berths are identified by 4-character alphanumeric codes. The format varies by ar
 - Mixed: `T684`, `L062`, `ARAP`
 
 **The berth code does NOT indicate track direction.** However, in our local area (LA), we observe a consistent convention:
-- **Even-numbered berths** (0036, 0038, 0040) = **Down line** (westbound, towards Littlehampton)
-- **Odd-numbered berths** (0037, 0039, 0041) = **Up line** (eastbound, towards Brighton)
+- **Even-numbered berths** (0036, 0038, 0040) = **Up line** (eastbound, towards Brighton)
+- **Odd-numbered berths** (0037, 0039, 0041) = **Down line** (westbound, towards Littlehampton)
 
-> ⚠️ **Confidence: HIGH** for our local area (LA). This even/odd convention is confirmed by comparing train headcodes with known timetable directions across 50+ train journeys. It may not apply to all areas.
+> ⚠️ **Confidence: HIGH** for our local area (LA). Verified against the TD area diagram (`docs/wiki-pages/TD_Map_LA.png`) and 600+ logged train events: every train direction='up' uses even berths and A030/A032; every direction='down' uses odd berths and A027/A029/A031. It may not apply to all areas.
 
 ---
 
@@ -194,14 +194,14 @@ Time        Area  From → To    Notes
 06:13:16    LA    0008 → 0006  Moving away westbound
 ```
 
-**Correction:** The above example uses lower-numbered berths. Our crossing is actually between berths **0036/0037** and **0038/0039**. A correct crossing approach:
+**Correction:** The above example uses lower-numbered berths. Our crossing is actually between berths **0036/0039** (east side) and **0038/0041** (west side). A correct crossing approach:
 
 ```
-Westbound (Down line, even berths):
+Eastbound (Up line, even berths) — train moves east, berth numbers decrease:
   0042 → 0040 → 0038 → [CROSSING] → 0036 → 0034 → 0032 → 0030
 
-Eastbound (Up line, odd berths):
-  0031 → 0033 → 0035 → 0037 → [CROSSING] → 0039 → 0041
+Westbound (Down line, odd berths) — train moves west, berth numbers increase:
+  0031 → 0033 → 0035 → 0037 → 0039 → [CROSSING] → 0041 → A027 → A029 → A031
 ```
 
 Each berth step takes approximately 45–120 seconds depending on train speed and berth length.

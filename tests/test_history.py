@@ -238,7 +238,7 @@ class TestGetPassages:
 class TestGetTrainEvents:
     def _seed_events(self, history_db):
         with freeze_time("2025-06-15 10:00:00", tz_offset=0):
-            history_db.log_train_event("1A23", "berth_step", "A027", "0040")
+            history_db.log_train_event("1A23", "berth_step", "0042", "0040")
         with freeze_time("2025-06-15 10:01:00", tz_offset=0):
             history_db.log_train_event("1A23", "berth_step", "0040", "0038")
         with freeze_time("2025-06-15 10:02:00", tz_offset=0):

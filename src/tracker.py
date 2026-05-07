@@ -305,9 +305,11 @@ class TrainTracker:
 
     def _classify_berth(self, berth: str, preferred_direction: Direction | None = None) -> tuple[TrainPhase | None, Direction | None]:
         """Determine what phase and direction a berth represents.
-        
-        If the train already has a known direction, check that direction first
-        so shared berths (e.g. A027 = up/approach AND down/clear) resolve correctly.
+
+        No berth is currently shared between directions, but `preferred_direction`
+        is honoured first as a defensive measure: if a berth ever gets reused for
+        both directions in future config (e.g. a bidirectional siding), trains
+        with a known direction will resolve consistently rather than flipping.
         """
         directions = list(Direction)
         if preferred_direction:

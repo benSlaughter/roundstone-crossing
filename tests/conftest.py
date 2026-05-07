@@ -15,7 +15,7 @@ def test_config():
     return {
         "td": {
             "area_id": "LA",
-            "approach_berths": {"up": ["A027"], "down": ["0033"]},
+            "approach_berths": {"up": ["0042"], "down": ["0033"]},
             "strike_in_berths": {"up": ["0040", "0038"], "down": ["0035", "0037", "0039"]},
             "at_crossing_berths": {"up": ["0036"], "down": ["0041"]},
             "clear_berths": {"up": ["0034"], "down": ["A027"]},

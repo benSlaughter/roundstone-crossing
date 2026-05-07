@@ -40,10 +40,12 @@ This methodology works perfectly for BM signals (80–100% correlation, confirmi
 **Status: CONFIRMED**
 
 In area LA, berth parity indicates track:
-- Even numbers (0036, 0038, 0040) = Down line (westbound)
-- Odd numbers (0037, 0039, 0041) = Up line (eastbound)
+- Even numbers (0036, 0038, 0040) = Up line (eastbound, towards Brighton)
+- Odd numbers (0037, 0039, 0041) = Down line (westbound, towards Littlehampton)
 
-**Evidence:** 54 trains analysed. Every westbound train (identified by headcode) used exclusively even berths. Every eastbound train used exclusively odd berths. Zero exceptions.
+**Evidence:** Verified against the TD area diagram (`docs/wiki-pages/TD_Map_LA.png`) and 600+ logged train events: every train direction='up' uses even berths (and A030/A032); every direction='down' uses odd berths (and A027/A029/A031). Zero exceptions.
+
+> ⚠️ This corrects an earlier revision of this document that asserted the **opposite** convention (even=Down, odd=Up). The original claim was based on faulty direction inference and contradicted by both the official TD map and the live data.
 
 ---
 
@@ -51,12 +53,13 @@ In area LA, berth parity indicates track:
 
 **Status: CONFIRMED**
 
-Roundstone Level Crossing is between berths **0036/0037** and **0038/0039**. Confirmed by the user marking the crossing position on the OpenTrainTimes signalling diagram.
+Roundstone Level Crossing is between berths **0036/0039** (east side) and **0038/0041** (west side). Confirmed by the user marking the crossing position on the OpenTrainTimes signalling diagram.
 
 This means:
-- A westbound train enters the crossing when stepping from `0040 → 0038`
-- An eastbound train enters the crossing when stepping from `0035 → 0037`
-- The train has cleared the crossing when it reaches `0036` (west) or `0039` (east)
+- An eastbound train enters the crossing when stepping from `0038 → 0036` (just past signal 38)
+- A westbound train enters the crossing when stepping from `0039 → 0041` (just past signal 39)
+- An eastbound train has cleared the crossing when it reaches `0034`
+- A westbound train has cleared the crossing when it reaches `A027` (past Angmering P2)
 
 ---
 
