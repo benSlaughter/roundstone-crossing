@@ -157,9 +157,12 @@ function updateStateBanner(crossing) {
   document.getElementById('state-confidence').textContent =
     `${Math.round(crossing.confidence * 100)}%`;
 
-  const sinceSecs = crossing.since_secs;
+  const sinceSecs = crossing.seconds_in_state ?? crossing.since_secs;
   document.getElementById('state-since').textContent =
     sinceSecs != null ? `for ${formatDuration(sinceSecs)}` : '';
+
+  // Reason for current state — empty string clears the line
+  document.getElementById('state-reason').textContent = crossing.reason || '';
 }
 
 // ── Crossing light ───────────────────────────────────────────────────

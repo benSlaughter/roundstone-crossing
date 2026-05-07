@@ -86,6 +86,57 @@ class TestLogStateChange:
         rows = history_db.get_intervals()
         assert len(rows) == 1
 
+    @freeze_time("2025-06-15 10:00:00", tz_offset=0)
+    def test_reason_persisted_in_interval(self, history_db):
+        """The reason field on CrossingStatus is stored in state_intervals."""
+        status = CrossingStatus(
+            state=CrossingState.CLOSING_PREDICTED, confidence=0.7,
+            reason="route SET, no train in zone yet (R35,RA007) — early warning",
+        )
+        history_db.log_state_change(status)
+
+        rows = history_db.get_intervals()
+        assert len(rows) == 1
+        assert rows[0]["reason"] == \
+            "route SET, no train in zone yet (R35,RA007) — early warning"
+
+    @freeze_time("2025-06-15 10:00:00", tz_offset=0)
+    def test_each_transition_records_its_own_reason(self, history_db):
+        """Different state transitions should each get their own reason recorded."""
+        with freeze_time("2025-06-15 10:00:00", tz_offset=0):
+            history_db.log_state_change(CrossingStatus(
+                state=CrossingState.OPEN, confidence=0.8,
+                reason="no trains in zone, no routes set",
+            ))
+        with freeze_time("2025-06-15 10:01:00", tz_offset=0):
+            history_db.log_state_change(CrossingStatus(
+                state=CrossingState.CLOSING_PREDICTED, confidence=0.7,
+                reason="route SET, no train in zone yet (R35) — early warning",
+            ))
+        with freeze_time("2025-06-15 10:05:00", tz_offset=0):
+            history_db.log_state_change(CrossingStatus(
+                state=CrossingState.CLOSED_INFERRED, confidence=0.95,
+                reason="train at crossing: 1A23 + routes (R35)",
+            ))
+
+        rows = history_db.get_intervals()
+        assert len(rows) == 3
+        # DESC order — newest first
+        assert rows[0]["reason"].startswith("train at crossing")
+        assert rows[1]["reason"].startswith("route SET")
+        assert rows[2]["reason"].startswith("no trains")
+
+    def test_reason_can_be_null_for_back_compat(self, history_db):
+        """CrossingStatus without a reason (e.g. legacy callers) should still log fine."""
+        status = CrossingStatus(state=CrossingState.OPEN, confidence=0.9)
+        # reason defaults to None
+        assert status.reason is None
+        history_db.log_state_change(status)
+
+        rows = history_db.get_intervals()
+        assert len(rows) == 1
+        assert rows[0]["reason"] is None
+
 
 # ---------------------------------------------------------------------------
 # 3. log_train_passage

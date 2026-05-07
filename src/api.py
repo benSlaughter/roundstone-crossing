@@ -77,6 +77,7 @@ def create_app(tracker: TrainTracker, inferrer: CrossingInferrer, history: Histo
         return {
             "state": inferrer.status.state.value,
             "confidence": round(inferrer.status.confidence, 2),
+            "reason": inferrer.status.reason,
             "trains": trains,
         }
 
@@ -86,6 +87,7 @@ def create_app(tracker: TrainTracker, inferrer: CrossingInferrer, history: Histo
         trains = inferrer.status.active_trains
         return {
             "crossing_state": inferrer.status.state.value,
+            "crossing_reason": inferrer.status.reason,
             "trains": [
                 {
                     "headcode": t.headcode,

@@ -69,6 +69,11 @@ class CrossingStatus:
     predicted_next_state: CrossingState | None = None
     active_trains: list[TrackedTrain] = field(default_factory=list)
     last_feed_message: datetime | None = None
+    # Human-readable explanation of WHY the current state was entered.
+    # Set by the inferrer at each transition; preserved unchanged when the
+    # state is re-asserted on subsequent ticks (so it always describes the
+    # original entry condition, not the most recent tick).
+    reason: str | None = None
 
     def seconds_until_change(self) -> float | None:
         if self.predicted_change:
@@ -80,6 +85,7 @@ class CrossingStatus:
         return {
             "state": self.state.value,
             "confidence": round(self.confidence, 2),
+            "reason": self.reason,
             "since": self.since.isoformat(),
             "seconds_in_state": round((datetime.now(timezone.utc) - self.since).total_seconds()),
             "predicted_change": self.predicted_change.isoformat() if self.predicted_change else None,

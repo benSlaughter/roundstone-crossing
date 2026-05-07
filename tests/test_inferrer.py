@@ -557,3 +557,134 @@ class TestRouteHoldCap:
             frozen.tick(delta=timedelta(seconds=400))
             status = inferrer.update([], datetime.now(timezone.utc), active_routes=["R35"])
             assert status.state == CrossingState.CLOSING_PREDICTED  # 400s held, under 900s cap
+
+
+@freeze_time(NOW)
+class TestStateReason:
+    """Every state transition should record a human-readable reason explaining
+    why that state was entered. Useful for /live debug view and history audit.
+
+    These tests verify that meaningful reason strings are populated on every
+    code path. They check for substrings rather than exact text so the wording
+    can be tweaked without breaking tests.
+    """
+
+    def test_open_no_trains_no_routes_reason(self, inferrer):
+        status = inferrer.update([], FEED_RECENT, active_routes=[])
+        assert status.state == CrossingState.OPEN
+        assert status.reason is not None
+        assert "no trains" in status.reason.lower()
+
+    def test_at_crossing_reason_includes_headcode(self, inferrer, make_train):
+        train = make_train(headcode="1A23", phase=TrainPhase.AT_CROSSING)
+        status = inferrer.update([train], FEED_RECENT, active_routes=[])
+        assert status.state == CrossingState.CLOSED_INFERRED
+        assert "1A23" in status.reason
+        assert "at crossing" in status.reason.lower()
+
+    def test_at_crossing_with_routes_reason_mentions_routes(self, inferrer, make_train):
+        train = make_train(phase=TrainPhase.AT_CROSSING)
+        status = inferrer.update([train], FEED_RECENT, active_routes=["R35", "RA007"])
+        assert status.state == CrossingState.CLOSED_INFERRED
+        assert "R35" in status.reason or "RA007" in status.reason
+        assert "route" in status.reason.lower()
+
+    def test_strike_in_with_routes_reason(self, inferrer, make_train):
+        train = make_train(headcode="2B45", phase=TrainPhase.STRIKE_IN,
+                           predicted_at_crossing=NOW + timedelta(seconds=60))
+        status = inferrer.update([train], FEED_RECENT, active_routes=["R32"])
+        assert status.state == CrossingState.CLOSED_INFERRED
+        assert "2B45" in status.reason
+        assert "R32" in status.reason
+        assert "strike-in" in status.reason.lower()
+
+    def test_strike_in_without_routes_reason(self, inferrer, make_train):
+        train = make_train(headcode="2B45", phase=TrainPhase.STRIKE_IN,
+                           predicted_at_crossing=NOW + timedelta(seconds=60))
+        status = inferrer.update([train], FEED_RECENT, active_routes=[])
+        assert status.state == CrossingState.CLOSING_PREDICTED
+        assert "2B45" in status.reason
+        assert "no route" in status.reason.lower()
+
+    def test_approaching_with_routes_reason(self, inferrer, make_train):
+        train = make_train(headcode="1A23", phase=TrainPhase.APPROACHING,
+                           predicted_at_crossing=NOW + timedelta(seconds=200))
+        status = inferrer.update([train], FEED_RECENT, active_routes=["R29"])
+        assert status.state == CrossingState.CLOSING_PREDICTED
+        assert "1A23" in status.reason
+        assert "R29" in status.reason
+        assert "approaching" in status.reason.lower()
+
+    def test_approaching_within_pre_closure_reason(self, inferrer, make_train):
+        train = make_train(headcode="1A23", phase=TrainPhase.APPROACHING,
+                           predicted_at_crossing=NOW + timedelta(seconds=60))
+        status = inferrer.update([train], FEED_RECENT, active_routes=[])
+        assert status.state == CrossingState.CLOSING_PREDICTED
+        assert "1A23" in status.reason
+        assert "pre_closure" in status.reason.lower() or "60s" in status.reason
+
+    def test_approaching_distant_reason(self, inferrer, make_train):
+        train = make_train(headcode="1A23", phase=TrainPhase.APPROACHING,
+                           predicted_at_crossing=NOW + timedelta(seconds=600))
+        status = inferrer.update([train], FEED_RECENT, active_routes=[])
+        assert status.state == CrossingState.OPEN
+        assert "1A23" in status.reason
+        assert "outside" in status.reason.lower()
+
+    def test_route_only_reason_lists_routes(self, inferrer):
+        status = inferrer.update([], FEED_RECENT, active_routes=["R35", "RA007"])
+        assert status.state == CrossingState.CLOSING_PREDICTED
+        assert "R35" in status.reason
+        assert "RA007" in status.reason
+        assert "no train" in status.reason.lower()
+
+    def test_route_hold_timeout_reason(self, inferrer):
+        with freeze_time(NOW) as frozen:
+            inferrer.update([], datetime.now(timezone.utc), active_routes=["R35"])
+            frozen.tick(delta=timedelta(seconds=901))
+            status = inferrer.update([], datetime.now(timezone.utc), active_routes=["R35"])
+            assert status.state == CrossingState.UNKNOWN
+            assert "stuck" in status.reason.lower() or "timeout" in status.reason.lower()
+            assert "R35" in status.reason
+
+    def test_stale_data_reason(self, inferrer, make_train):
+        very_old_feed = NOW - timedelta(seconds=400)
+        status = inferrer.update([], very_old_feed, active_routes=[])
+        assert status.state == CrossingState.STALE_DATA
+        assert "feed" in status.reason.lower()
+
+    def test_opening_predicted_reason(self, inferrer, make_train):
+        # Train at crossing, then clears
+        train = make_train(phase=TrainPhase.AT_CROSSING)
+        inferrer.update([train], FEED_RECENT, active_routes=[])
+        status = inferrer.update([], FEED_RECENT, active_routes=[])
+        assert status.state == CrossingState.OPENING_PREDICTED
+        assert "post-clearance" in status.reason.lower() or "cctv" in status.reason.lower()
+
+    def test_was_closed_reason_mentions_held(self, inferrer, make_train):
+        # Get into CLOSED_INFERRED first
+        train = make_train(headcode="1A23", phase=TrainPhase.AT_CROSSING)
+        inferrer.update([train], FEED_RECENT, active_routes=[])
+        # Now follow with a strike-in train (simulating consecutive trains): was_closed branch fires
+        next_train = make_train(headcode="2B45", phase=TrainPhase.STRIKE_IN,
+                                predicted_at_crossing=NOW + timedelta(seconds=60))
+        status = inferrer.update([next_train], FEED_RECENT, active_routes=[])
+        assert status.state == CrossingState.CLOSED_INFERRED
+        assert "held closed" in status.reason.lower() or "still active" in status.reason.lower()
+
+    def test_reason_is_set_on_every_state(self, inferrer, make_train):
+        """Defensive check: reason should never be None after a state is set."""
+        scenarios = [
+            ([], FEED_RECENT, []),                                                     # OPEN
+            ([], FEED_RECENT, ["R35"]),                                                # CLOSING_PREDICTED route-only
+            ([make_train(phase=TrainPhase.AT_CROSSING)], FEED_RECENT, []),             # CLOSED_INFERRED
+            ([make_train(phase=TrainPhase.STRIKE_IN,
+                         predicted_at_crossing=NOW + timedelta(seconds=60))],
+             FEED_RECENT, []),                                                          # CLOSING_PREDICTED
+            ([], NOW - timedelta(seconds=400), []),                                    # STALE_DATA
+        ]
+        for trains, feed, routes in scenarios:
+            inferrer = type(inferrer)(inferrer.config)  # fresh inferrer per scenario
+            status = inferrer.update(trains, feed, active_routes=routes)
+            assert status.reason is not None, f"reason missing for state {status.state}"
+            assert len(status.reason) > 0, f"reason empty for state {status.state}"

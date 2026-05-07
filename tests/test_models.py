@@ -139,7 +139,7 @@ class TestToDict:
         status = CrossingStatus()
         d = status.to_dict()
         expected_keys = {
-            "state", "confidence", "since", "seconds_in_state",
+            "state", "confidence", "reason", "since", "seconds_in_state",
             "predicted_change", "seconds_until_change",
             "predicted_next_state", "active_trains",
         }

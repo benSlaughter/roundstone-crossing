@@ -43,9 +43,17 @@ class HistoryLogger:
                 ended_at TEXT,
                 duration_secs REAL,
                 active_train_count INTEGER DEFAULT 0,
-                notes TEXT
+                notes TEXT,
+                reason TEXT
             )
         """)
+
+        # Idempotent migration for pre-existing databases that lack `reason`.
+        existing_cols = {r[1] for r in db.execute(
+            "PRAGMA table_info(state_intervals)").fetchall()}
+        if "reason" not in existing_cols:
+            db.execute("ALTER TABLE state_intervals ADD COLUMN reason TEXT")
+            logger.info("Migrated state_intervals: added 'reason' column")
 
         db.execute("""
             CREATE TABLE IF NOT EXISTS train_passages (
@@ -120,7 +128,13 @@ class HistoryLogger:
         logger.info(f"History database: {self.db_path}")
 
     def log_state_change(self, status: CrossingStatus):
-        """Log a crossing state transition."""
+        """Log a crossing state transition.
+
+        On transition (state actually changes), opens a new state_intervals row
+        with the current state's reason. The reason is captured at insert time
+        only — re-asserting the same state on subsequent ticks does not update
+        the stored reason (it always describes why the state was first entered).
+        """
         now = datetime.now(timezone.utc).isoformat()
         db = self._connect()
 
@@ -135,12 +149,15 @@ class HistoryLogger:
         # Open new interval
         if self._current_state != status.state:
             cursor = db.execute(
-                "INSERT INTO state_intervals (state, confidence, started_at, active_train_count) VALUES (?, ?, ?, ?)",
-                (status.state.value, status.confidence, now, len(status.active_trains)),
+                "INSERT INTO state_intervals "
+                "(state, confidence, started_at, active_train_count, reason) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (status.state.value, status.confidence, now,
+                 len(status.active_trains), status.reason),
             )
             self._current_interval_id = cursor.lastrowid
             self._current_state = status.state
-            logger.debug(f"Logged state: {status.state.value} (interval #{self._current_interval_id})")
+            logger.debug(f"Logged state: {status.state.value} (interval #{self._current_interval_id}) — {status.reason}")
 
         db.commit()
         db.close()
