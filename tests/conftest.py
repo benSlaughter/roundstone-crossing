@@ -31,6 +31,7 @@ def test_config():
             "crossing_clearance_secs": 10,
             "min_warning_secs": 27,
             "stale_threshold_secs": 300,
+            "max_route_hold_secs": 900,
         },
         "trust": {
             "timing_points": [

@@ -29,32 +29,51 @@ EXPERIMENT_DB = Path(__file__).parent / "signal_data.db"
 SERVER_DB = Path(__file__).parent.parent / "crossing.db"
 
 # ---------------------------------------------------------------------------
-# LA route bit map (from SOP decode)
+# LA route bit map (from wiki SOP decode, via Wayback Machine 2025)
 # ---------------------------------------------------------------------------
-# Routes near the crossing (within ~4 berths either side)
-# Key = (address, bit), value = (route_name, side)
-# side: "east" = routes for signals east of crossing (0032-0035)
-#        "west" = routes for signals west of crossing (A007-A010)
-CROSSING_ROUTES = {
-    ("04", 6): ("R35", "east"),
-    ("04", 4): ("R34", "east"),
-    ("04", 5): ("R34b", "east"),
-    ("04", 3): ("R33", "east"),
-    ("04", 2): ("R32", "east"),
-    ("03", 7): ("R31", "east"),
-    ("04", 0): ("R31b", "east"),
-    ("03", 0): ("R29", "east"),
-    ("02", 7): ("R28", "east"),
-    ("02", 6): ("R27", "east"),
-    ("05", 1): ("RA007", "west"),
-    ("05", 2): ("RA008", "west"),
-    ("03", 4): ("RA010", "west"),
-    ("03", 5): ("RA010b", "west"),
+# side: "east" = routes for LG-area signals east of crossing
+#       "west" = routes for AR-area signals west of crossing
+#       "far_west" = L002 (Littlehampton) / FL (Ford Loop) — far west
+#
+# CSV switch: set EXTRA_ROUTES=True to include the wider bit set we want to
+# evaluate against the original 14-bit baseline.
+EXTRA_ROUTES = False  # set True to evaluate the wider bit set against baseline
+
+BASELINE_ROUTES = {
+    # 14 bits matching the production config
+    ("02", 6): ("R27", "east"),    ("02", 7): ("R28", "east"),
+    ("03", 0): ("R29", "east"),    ("03", 7): ("R31", "east"),
+    ("04", 0): ("R31b", "east"),   ("04", 2): ("R32", "east"),
+    ("04", 3): ("R33", "east"),    ("04", 4): ("R34", "east"),
+    ("04", 5): ("R34b", "east"),   ("04", 6): ("R35", "east"),
+    ("05", 1): ("RA007", "west"),  ("05", 2): ("RA008", "west"),
+    ("03", 4): ("RA010", "west"),  ("03", 5): ("RA010b", "west"),
 }
+
+# Bits added based on per-bit match-rate analysis (10 days production data).
+# Selection rule: include if SET-matches-passage rate >= 50% AND
+#                 lead time is in the useful range (60-600s).
+EXTRA_BITS = {
+    ("03", 2): ("R30", "east"),         # 93.8% match, 191s lead — strongest single new bit
+    ("05", 0): ("RA005", "west"),       # 69.8% match, 160s lead
+    ("02", 5): ("R26b", "east"),        # 59.6% match, 227s lead (R26 dual-bit secondary)
+    ("02", 2): ("R25", "east"),         # 53.5% match, 178s lead
+    ("03", 1): ("R29b", "east"),        # 64.3% match (only 14 SETs — low N but consistent)
+    ("06", 5): ("FL30", "far_west"),    # 70.3% match, 198s lead — Ford Loop east signal
+    ("06", 6): ("FL32", "far_west"),    # 63.2% match, 228s lead
+    ("05", 5): ("L002a", "far_west"),   # 73.3% match, 126s lead — Littlehampton
+    ("05", 6): ("L002b", "far_west"),   # 60.9% match, 249s lead
+    ("06", 0): ("L002d", "far_west"),   # 65.2% match, 213s lead
+    # Excluded (low match-rate or rare): R22-R24, R202-R204, A008b (dual), A009, FL33/FL36
+}
+
+CROSSING_ROUTES = dict(BASELINE_ROUTES)
+if EXTRA_ROUTES:
+    CROSSING_ROUTES.update(EXTRA_BITS)
 
 # Berth zone config (from config.yaml)
 APPROACH_BERTHS = {
-    "up": {"A027"},
+    "up": {"0042"},
     "down": {"0033"},
 }
 STRIKE_IN_BERTHS = {

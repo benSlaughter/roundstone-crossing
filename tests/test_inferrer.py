@@ -431,3 +431,129 @@ class TestRouteEnhancedPrediction:
         # All trains and routes cleared
         status = inferrer.update([], FEED_RECENT, active_routes=[])
         assert status.state == CrossingState.OPENING_PREDICTED
+
+
+@freeze_time(NOW)
+class TestRouteOnlyOpeningPredicted:
+    """Tests for OPENING_PREDICTED triggered by route-clear alone (no AT_CROSSING ever).
+
+    For MCB-CCTV crossings, the signaller cannot set a route until barriers are
+    down + CCTV verified. So route SET implies barriers down. When the route
+    eventually clears with no train ever appearing in our berth zone (e.g. the
+    train route bypassed our zone, or we missed the steps), we should still
+    transition through OPENING_PREDICTED briefly — not jump straight to OPEN.
+    """
+
+    def test_route_only_clear_emits_opening_predicted(self, inferrer):
+        """Routes set with no trains, then routes clear → OPENING_PREDICTED."""
+        # Tick 1: routes set, no trains → CLOSING_PREDICTED via route-only branch
+        status = inferrer.update([], FEED_RECENT, active_routes=["R35"])
+        assert status.state == CrossingState.CLOSING_PREDICTED
+        assert status.confidence == 0.7
+
+        # Tick 2: routes clear, still no trains → OPENING_PREDICTED (not OPEN)
+        status = inferrer.update([], FEED_RECENT, active_routes=[])
+        assert status.state == CrossingState.OPENING_PREDICTED
+        assert status.predicted_next_state == CrossingState.OPEN
+        assert status.predicted_change is not None
+
+    def test_no_routes_initial_state_no_opening(self, inferrer):
+        """No prior routes, then call with no routes → straight to OPEN, no OPENING flicker."""
+        status = inferrer.update([], FEED_RECENT, active_routes=[])
+        assert status.state == CrossingState.OPEN
+
+    def test_route_only_then_clear_then_open_after_window(self, inferrer):
+        """OPENING_PREDICTED expires after post_clearance_secs → OPEN."""
+        with freeze_time(NOW) as frozen:
+            inferrer.update([], datetime.now(timezone.utc), active_routes=["R35"])
+            inferrer.update([], datetime.now(timezone.utc), active_routes=[])
+            # Immediately after route clear: OPENING_PREDICTED
+            assert inferrer.status.state == CrossingState.OPENING_PREDICTED
+
+            # Advance past the post_clearance window (5s in test config)
+            frozen.tick(delta=timedelta(seconds=10))
+            status = inferrer.update([], datetime.now(timezone.utc), active_routes=[])
+            assert status.state == CrossingState.OPEN
+
+
+@freeze_time(NOW)
+class TestRouteHoldCap:
+    """Tests for the route-hold cap: route-only inference shouldn't last forever.
+
+    Stuck routes (240s lock-after-cancel, signal failure, signaller anomaly)
+    can persist with no train ever passing. After max_route_hold_secs, we
+    downgrade to UNKNOWN rather than asserting CLOSED indefinitely.
+    """
+
+    def test_short_route_hold_stays_closing_predicted(self, inferrer):
+        """Route held briefly (< cap) → stays CLOSING_PREDICTED."""
+        with freeze_time(NOW) as frozen:
+            status = inferrer.update([], datetime.now(timezone.utc), active_routes=["R35"])
+            assert status.state == CrossingState.CLOSING_PREDICTED
+
+            frozen.tick(delta=timedelta(seconds=300))  # 5 min, under the cap
+            status = inferrer.update([], datetime.now(timezone.utc), active_routes=["R35"])
+            assert status.state == CrossingState.CLOSING_PREDICTED
+            assert status.confidence == 0.7
+
+    def test_long_route_hold_downgrades_to_unknown(self, inferrer):
+        """Route held > max_route_hold_secs → UNKNOWN with low confidence."""
+        with freeze_time(NOW) as frozen:
+            inferrer.update([], datetime.now(timezone.utc), active_routes=["R35"])
+            assert inferrer.status.state == CrossingState.CLOSING_PREDICTED
+
+            # Cap is 900s in test config; advance past it
+            frozen.tick(delta=timedelta(seconds=901))
+            status = inferrer.update([], datetime.now(timezone.utc), active_routes=["R35"])
+            assert status.state == CrossingState.UNKNOWN
+            assert status.confidence == 0.3
+
+    def test_route_hold_resets_when_train_appears(self, inferrer, make_train):
+        """If a train appears, the routes-only timer resets — long subsequent route holds OK."""
+        with freeze_time(NOW) as frozen:
+            inferrer.update([], datetime.now(timezone.utc), active_routes=["R35"])
+
+            # Cap nearly hit; train arrives in time to reset the timer
+            frozen.tick(delta=timedelta(seconds=890))
+            train = make_train(phase=TrainPhase.AT_CROSSING)
+            inferrer.update([train], datetime.now(timezone.utc), active_routes=["R35"])
+            assert inferrer.status.state == CrossingState.CLOSED_INFERRED
+
+            # Train clears, routes still active — back to route-only branch.
+            # Per existing behaviour (test_routes_prevent_premature_opening), we
+            # downgrade to CLOSING_PREDICTED 0.7 when no trains + routes only.
+            # The cap timer restarts here because _routes_only_since was reset.
+            frozen.tick(delta=timedelta(seconds=10))
+            status = inferrer.update([], datetime.now(timezone.utc), active_routes=["R35"])
+            assert status.state == CrossingState.CLOSING_PREDICTED
+            assert status.confidence == 0.7
+
+            # Hitting the cap requires another full max_route_hold_secs from now.
+            # Half the cap → still CLOSING_PREDICTED.
+            frozen.tick(delta=timedelta(seconds=450))
+            status = inferrer.update([], datetime.now(timezone.utc), active_routes=["R35"])
+            assert status.state == CrossingState.CLOSING_PREDICTED
+
+            # Past the cap → UNKNOWN.
+            frozen.tick(delta=timedelta(seconds=500))
+            status = inferrer.update([], datetime.now(timezone.utc), active_routes=["R35"])
+            assert status.state == CrossingState.UNKNOWN
+
+    def test_route_hold_resets_when_routes_clear(self, inferrer):
+        """When routes briefly clear and re-set, the timer restarts."""
+        with freeze_time(NOW) as frozen:
+            inferrer.update([], datetime.now(timezone.utc), active_routes=["R35"])
+
+            # Routes briefly clear
+            frozen.tick(delta=timedelta(seconds=500))
+            inferrer.update([], datetime.now(timezone.utc), active_routes=[])
+
+            # Routes set again — fresh start, well under cap
+            frozen.tick(delta=timedelta(seconds=600))
+            status = inferrer.update([], datetime.now(timezone.utc), active_routes=["R35"])
+            assert status.state == CrossingState.CLOSING_PREDICTED
+
+            # Need full cap from this point to hit UNKNOWN
+            frozen.tick(delta=timedelta(seconds=400))
+            status = inferrer.update([], datetime.now(timezone.utc), active_routes=["R35"])
+            assert status.state == CrossingState.CLOSING_PREDICTED  # 400s held, under 900s cap

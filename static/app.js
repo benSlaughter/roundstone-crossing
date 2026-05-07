@@ -37,10 +37,10 @@ function esc(str) {
 
 // Berth positions on the schematic (percentage from left edge)
 // Real geography: Angmering (west, ~14%) — CROSSING (~27%) — Goring (east, ~86%)
-// Crossing is ~400m east of Angmering, ~2.5km west of Goring.
+// Crossing is ~885m east of Angmering, ~3.07km west of Goring (BLI1 mileages + BPLAN nwk).
 const BERTH_POSITIONS = {
   // Eastbound (up) berths — west to east
-  'A027': 2,    // far west approach
+  '0042': 2,    // far west approach (eastbound entry to area LA)
   '0040': 4,    // west of Angmering
   '0038': 8,    // west of Angmering P1 (entry side for eastbound)
   '0036': 45,   // just past crossing (eastbound)
@@ -53,11 +53,12 @@ const BERTH_POSITIONS = {
   '0037': 55,   // between crossing and Goring
   '0039': 39,   // approaching crossing (westbound)
   '0041': 25,   // east of Angmering P2 (entry side for westbound)
+  'A027': 2,    // past Angmering P2, departed westward
 };
 
 // Which line (up=P1/top, down=P2/bottom) each berth belongs to
 const BERTH_LINE = {
-  '0040': 'up', '0038': 'up',
+  '0042': 'up', '0040': 'up', '0038': 'up',
   '0036': 'up', '0034': 'up', '0032': 'up', '0030': 'up',
   'A027': 'down',
   '0033': 'down', '0035': 'down', '0037': 'down',

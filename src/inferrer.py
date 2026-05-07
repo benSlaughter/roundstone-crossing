@@ -19,6 +19,11 @@ class CrossingInferrer:
         self.status = CrossingStatus()
         self._timing = config.get("timing", {})
         self._last_clear_time: datetime | None = None
+        # Tracks when the route-only "barriers down" inference began. Used to
+        # cap that inference (stuck routes shouldn't keep us locked in CLOSED
+        # forever) and to support OPENING_PREDICTED when the route eventually
+        # clears with no train ever appearing in our berth zone.
+        self._routes_only_since: datetime | None = None
 
     def update(self, active_trains: list[TrackedTrain], last_feed_time: datetime | None,
                active_routes: list[str] | None = None):
@@ -46,9 +51,29 @@ class CrossingInferrer:
         if not active_trains:
             if has_routes:
                 # No trains visible but routes are still SET — barriers likely still down
-                # This catches the gap between route SET and train appearing in our zone
+                # This catches the gap between route SET and train appearing in our zone.
+                if self._routes_only_since is None:
+                    self._routes_only_since = now
+                held = (now - self._routes_only_since).total_seconds()
+
+                # Cap the "barriers down" inference: if routes have been SET for
+                # too long with no train activity, the route is probably stuck
+                # (240s lock-after-cancel, signal failure, or signaller anomaly).
+                # Admit uncertainty rather than assert CLOSED indefinitely.
+                max_hold = self._timing.get("max_route_hold_secs", 900)
+                if held > max_hold:
+                    self._transition(CrossingState.UNKNOWN, confidence=0.3)
+                    return self.status
+
+                # Track _last_clear_time so OPENING_PREDICTED fires briefly when
+                # the route eventually clears (signaller verifies CCTV before
+                # raising barriers — same flow as a normal post-train clearance).
+                self._last_clear_time = now
                 self._transition(CrossingState.CLOSING_PREDICTED, confidence=0.7)
                 return self.status
+
+            # No trains AND no routes — leaving any route-only state.
+            self._routes_only_since = None
 
             # Check if we just cleared — show OPENING_PREDICTED briefly
             post_clearance = self._timing.get("post_clearance_secs", 15)
@@ -62,6 +87,9 @@ class CrossingInferrer:
                 self._transition(CrossingState.OPEN, confidence=0.8)
                 self._last_clear_time = None
             return self.status
+
+        # Trains active — leaving any route-only state.
+        self._routes_only_since = None
 
         # Classify based on the "most advanced" train phase
         phases = [t.phase for t in active_trains]

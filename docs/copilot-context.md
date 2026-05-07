@@ -19,7 +19,7 @@ The project also includes an **ESP32-C3 physical barrier logger** for ground-tru
 - **Known issue**: 5+ minute closures common, local complaints about excessive down-time
 
 ### Calibrated Barrier Timing (from real observations)
-- **Pre-closure**: ~120s before train arrives → barriers lower (confirmed from observations)
+- **Pre-closure**: route SET → at-crossing median 212s (10-day production data). Per MCB-CCTV procedure, barriers are confirmed down ≥ this lead time. Inferrer uses `pre_closure_secs: 180` for the train-only fallback path (compromise between P25 150s and median 212s). Old 120s figure was based on a small observation sample and underestimated.
 - **Crossing clearance**: ~10s for a train to physically clear (at 70mph, 200m ≈ 6s + margin)
 - **Post-clearance**: ~5s after last train clears → barriers raise
 - **Total last-train-to-opening**: consistently 14-15s across multiple observation windows
@@ -106,7 +106,7 @@ NROD STOMP Feeds (TD + TRUST + SF)
 | `static/style.css` | Dashboard styles |
 | `static/app.js` | Dashboard JavaScript |
 | `src/utils.py` | Shared utilities (window merging, helpers) |
-| `tests/` | 232 tests across inferrer, tracker, feed, API, history, RTT, models |
+| `tests/` | 302 tests across inferrer, tracker, feed, API, history, RTT, models |
 | `device/` | ESP32-C3 barrier logger (firmware, docs, schematics) |
 | `data/observations/` | Manual crossing observations with accuracy notes |
 | `docs/research.md` | Full research on data sources, APIs, crossing details |
@@ -115,13 +115,119 @@ NROD STOMP Feeds (TD + TRUST + SF)
 | `.github/workflows/build.yml` | CI: tests on PR, Docker build+push to GHCR on main |
 | `update.sh` | One-command server deploy script |
 
+## Directory Layout
+
+```
+roundstone-crossing/
+├── src/                              # Application code
+│   ├── api.py                        # FastAPI endpoints (/status, /predictions, /live, etc.)
+│   ├── feed.py                       # NROD STOMP connection (TD/TRUST/SF)
+│   ├── history.py                    # SQLite history logger
+│   ├── inferrer.py                   # Crossing state machine
+│   ├── main.py                       # Entry point
+│   ├── models.py                     # Dataclasses (TrackedTrain, CrossingStatus, etc.)
+│   ├── route_monitor.py              # SF route SET/CLEAR tracker for LA area
+│   ├── rtt.py                        # Realtime Trains API client
+│   ├── tracker.py                    # Per-train tracking from TD/TRUST/RTT
+│   └── utils.py                      # Shared helpers
+├── static/                           # Web dashboard assets
+│   ├── index.html                    # Main public dashboard
+│   ├── app.js                        # Main dashboard JS
+│   ├── style.css                     # Main dashboard CSS
+│   ├── live.html                     # Hidden /live debug view (raw data)
+│   ├── live.js                       # Live view JS
+│   └── live.css                      # Live view CSS
+├── tests/                            # Pytest suite (302 tests)
+│   ├── conftest.py                   # Shared fixtures
+│   ├── test_api.py                   # API endpoint tests
+│   ├── test_feed.py                  # NROD feed/route monitor integration
+│   ├── test_history.py               # SQLite logger
+│   ├── test_inferrer.py              # State machine + route-enhanced
+│   ├── test_models.py                # Dataclass behaviour
+│   ├── test_route_monitor.py         # SF parsing, golden bytes
+│   ├── test_rtt.py                   # RTT API client
+│   └── test_tracker.py               # Train tracking + classification
+├── docs/                             # Project documentation
+│   ├── copilot-context.md            # THIS FILE — quick context for AI/devs
+│   ├── research.md                   # Full research on data sources, APIs, crossing
+│   ├── roadmap.md                    # Long-term roadmap
+│   ├── TODO.md                       # Active task list
+│   ├── quality-audit.md              # Code quality audit notes
+│   ├── nrod-datasheet/               # Comprehensive NROD reference
+│   │   ├── README.md
+│   │   ├── 01-connection.md
+│   │   ├── 02-td-messages.md
+│   │   ├── 03-sf-messages.md
+│   │   ├── 04-area-mapping.md
+│   │   ├── 05-observations.md
+│   │   ├── 06-la-sop.md              # LA (Lancing) Standard Operating Procedure
+│   │   └── 07-bm-sop.md              # BM (Barnham) Standard Operating Procedure
+│   └── wiki-pages/                   # Saved Open Rail Data wiki HTML (gitignored)
+│       ├── BM - Open Rail Data Wiki.html
+│       ├── C Class Messages - Open Rail Data Wiki.html
+│       ├── Decoding S-Class Data - Open Rail Data Wiki.html
+│       ├── LA - Open Rail Data Wiki.html
+│       ├── List of Train Describers - Open Rail Data Wiki.html
+│       ├── RTPPM - Open Rail Data Wiki.html
+│       ├── Reference Data - Open Rail Data Wiki.html
+│       └── S Class Messages - Open Rail Data Wiki.html
+├── experiments/                      # One-off analysis scripts (not in production loop)
+│   ├── README.md                     # Explains what experiments are for
+│   ├── analyse_signals.py            # SF signal correlation analysis
+│   ├── route_prediction_experiment.py # Route-enhanced prediction validation
+│   ├── raw_dumper.py                 # Captures raw NROD messages for analysis
+│   ├── signal_logger.py              # Long-running SF logger (PID in logger.pid)
+│   ├── signal_data.db                # SF event capture DB (gitignored)
+│   ├── signal_log.jsonl              # Append-only SF log (gitignored)
+│   ├── images/                       # Reference signal diagrams (gitignored)
+│   │   ├── angmering.png             # OpenTrainTimes signalling diagram
+│   │   ├── angmering-vaildata.png    # Sectional Appendix Table A (Angmering)
+│   │   ├── goring-vaildata.png       # Sectional Appendix Table A (Goring)
+│   │   ├── barnham.png               # Barnham OTT diagram
+│   │   └── littlehampton.png         # Littlehampton OTT diagram
+│   └── raw_dumps/                    # Raw NROD topic captures (gitignored)
+│       ├── RTPPM_ALL.jsonl
+│       ├── TD_ALL_SIG_AREA.jsonl
+│       ├── TRAIN_MVT_ALL_TOC.jsonl
+│       ├── TSR_ALL_ROUTE.jsonl
+│       └── VSTP_ALL.jsonl
+├── data/                             # Reference + observation data
+│   ├── corpus.json                   # Network Rail CORPUS (TIPLOC/STANOX)
+│   ├── smart.json                    # Network Rail SMART (berth → location)
+│   └── observations/                 # Manual crossing observations
+│       ├── README.md
+│       └── YYYY-MM-DD.csv            # One file per observation day
+├── device/                           # ESP32-C3 hardware barrier logger
+│   ├── README.md
+│   ├── docs/
+│   │   ├── assembly.md
+│   │   └── schematic.md
+│   └── firmware/barrier_logger/      # PlatformIO firmware
+├── scripts/                          # Helper scripts
+│   ├── download_reference_data.py    # Fetch CORPUS/SMART JSON
+│   └── find_berths.py                # Berth lookup utility
+├── logs/                             # Runtime logs (gitignored)
+├── .github/workflows/build.yml       # CI: tests + Docker build/push to GHCR
+├── config.yaml                       # All configuration (berths, timing, routes)
+├── crossing.db                       # Live SQLite DB (gitignored)
+├── Dockerfile                        # Multi-stage Python 3.12 build
+├── docker-compose.yml                # Container with persistent volumes
+├── requirements.txt                  # Python deps
+├── update.sh                         # One-command deploy script
+└── README.md                         # Project overview
+```
+
+**Gitignored:** `crossing.db`, `logs/`, `experiments/images/`, `experiments/raw_dumps/`,
+`experiments/signal_data.db*`, `experiments/signal_log.jsonl`, `docs/wiki-pages/`,
+`.venv/`, `.env`, `server.pid`.
+
 ## How to Run
 
 ```bash
 cd ~/projects/roundstone-crossing
 source .venv/bin/activate
 python -m src.main --api --debug   # predictor + API on 127.0.0.1:8590
-python -m pytest tests/ -v         # run test suite (232 tests, ~2s)
+python -m pytest tests/ -v         # run test suite (302 tests, ~4s)
 ```
 
 The server writes its PID to `server.pid` (gitignored).
@@ -162,7 +268,7 @@ STALE_DATA ←── (any state, if feed age > 300s)
 
 ### MCB-CCTV Barrier Timing (calibrated)
 - Minimum warning time: 27 seconds (GK/RT0192 standard)
-- Pre-closure: ~120s (signaller lowers barriers ~2 min before train)
+- Pre-closure: ~180s configured (route SET ≥ 212s before train, barriers confirmed down at that point per MCB-CCTV procedure)
 - Crossing clearance: ~10s (train physically clears the crossing zone)
 - Post-clearance: ~5s (signaller verifies CCTV and raises barriers)
 - Total closure per train: typically 2-3 minutes
@@ -173,3 +279,54 @@ STALE_DATA ←── (any state, if feed age > 300s)
 - Derived intervals (e.g. train-to-opening): ±5-10s (two imprecise measurements)
 - Calibration uses median values across observations, not outliers
 - Device-logged data will be ~100ms accuracy when ESP32 is built
+
+### Signal Layout (verified from OpenTrainTimes + Sectional Appendix BLI1)
+
+**Mileages (ELR BLI1, from Brighton):**
+- Goring-by-Sea station: 13m 07ch
+- Goring LC (CCTV): 13m 10ch
+- Ferring LC (CCTV): 13m 56ch
+- Langmeads No.1 Crossing: 14m 31ch
+- Roundstone LC (CCTV): 15m 00ch
+- Angmering Substation: 15m 25ch
+- Angmering station: 15m 44ch
+- Angmering LC (CCTV): 15m 48ch
+- Brook Lane Crossing: 16m 45ch
+- Norway Lane Crossing: 17m 12ch
+
+**Roundstone is WEST of Goring, EAST of Angmering** (44 chains ≈ 885m east of Angmering station).
+Lower BLI1 mileage = closer to Brighton = east. So west→east order is: Angmering (15m 44ch) → Roundstone (15m 00ch) → Goring (13m 07ch).
+BPLAN network link distance Angmering→Goring is 3958m; Roundstone sits ~885m east of Angmering platform and ~3073m west of Goring.
+
+**Signal numbering convention (UK):**
+- Odd numbers = DOWN line (westbound, towards London/Brighton)
+- Even numbers = UP line (eastbound, towards Portsmouth/Littlehampton)
+
+**Signals around Roundstone crossing (from OTT diagram, west→east):**
+- UP line (eastbound, top): 8 — 30 — 42 — 40 — [ANG P1] — 38 — |ROUNDSTONE LC| — 36 — 34 — 32
+- DOWN line (westbound, bottom): 33 — 31 — 29 — 27 — [ANG P2] — 41 — 39 — |ROUNDSTONE LC| — 37 — 35 — 33
+
+**Signaller control area boundary:**
+- AR (Arundel SB) controls west of Angmering area
+- LG (Lancing SB) controls east of Angmering area (including Roundstone)
+- Boundary line marked between signal 27 and signal 42 area
+
+**Train Describer:** TCB (Track Circuit Block) signalling, RA8 routing, DC: Brighton.
+
+### Route → Signal Mapping (LA TD area)
+
+Route names in NROD SF data correspond to physical signals:
+- **R-prefix routes** (R27, R28, R29, R31, R31b, R32, R33, R34, R34b, R35) = routes from numbered signals in the Lancing (LG) area
+- **RA-prefix routes** (RA007, RA008, RA010, RA010b) = routes from Arundel (AR) area signals (different numbering scheme)
+- The "b" suffix (R31b, R34b, RA010b) indicates a subsidiary/alternate route from the same signal
+- "east/west side" labels in config.yaml refer to which side of Roundstone crossing the controlling signal sits, NOT the direction of travel
+- A single train movement may set 1-3 routes in sequence (A→B, B→C). Most common pairings: R27+R29 (97x), RA008+RA010 (55x), R31+R33 (49x)
+
+### Routes — Verified Behaviour (from 9 days of data)
+- Routes are SET by the signaller and CLEARED by train passage (or 240s cancellation timeout)
+- Routes are strictly directional (A→B only, never wrong-way)
+- For MCB-CCTV crossings: route SET requires barriers already down + CCTV verification
+- 98.8% of crossings have at least one LA route SET within ±180s
+- No single route fires for all crossings — most common is R27 at 49% of all closures
+- "East side" routes (R-prefix) and "west side" routes (RA-prefix) both fire for both directions of travel — they don't indicate train direction
+- Route SET happens 50–100s before barrier-down observation, providing early warning
