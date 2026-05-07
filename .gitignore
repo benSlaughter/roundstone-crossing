@@ -33,3 +33,18 @@ build/
 # Node
 node_modules/
 server.pid
+
+# Experiment runtime data (databases, logs, output, PID files)
+experiments/*.db
+experiments/*.db-shm
+experiments/*.db-wal
+experiments/*.jsonl
+experiments/*.out
+experiments/*.pid
+
+# Experiment directories with large/sensitive data
+experiments/images/
+experiments/raw_dumps/
+
+# Wiki page dumps (HTML, copyrighted content)
+docs/wiki-pages/
