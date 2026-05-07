@@ -60,18 +60,26 @@ Bit:  7 6 5 4 3 2 1 0
 
 ### What Do the Bits Mean?
 
-This is the key challenge. **The bit-to-function mapping is not published by Network Rail.** The mappings must be discovered through observation and correlation.
+The bit-to-function mapping is defined in each area's **Signalling Output Plan (SOP)**. SOPs are published on the [Open Rail Data wiki](https://wiki.openraildata.com) (some are marked "work in progress") and can be verified through the "Breaking The Code" correlation methodology — correlating CA berth steps with SF bit changes within ±5s.
 
-What we know in general:
-- **Signal aspects** (red/green/yellow) are encoded in SF bits
-- **Route indicators** (which route is set through a junction) are encoded in SF bits
-- **Point positions** (normal/reverse) may be encoded in SF bits
+Each TD area has a **capability specification** that determines which data types it carries:
 
-What we do NOT know:
-- The specific mapping of which bit = which signal/function for any given area
-- Whether **level crossing barrier state** is encoded in SF data (our analysis suggests it may not be — see [05-observations.md](05-observations.md))
+| Type | Code | Description |
+|------|------|-------------|
+| SIG | Signal | Signal aspects (red/green/yellow) |
+| RTE | Route | Route indicators (which route is set through a junction) |
+| TRK | Track | Track circuit occupancy |
+| PTS | Points | Point positions (normal/reverse) |
+| LXG | Level crossing | Level crossing barrier state |
+| LAT | Latching | Latching indicators (e.g. TRTS — Train Ready To Start) |
 
-> ⚠️ **Confidence: LOW** for bit-level interpretation. The general categories are well-understood, but specific mappings are unconfirmed.
+Not all areas carry all types. For example, area **LA carries RTE only** — no signals, track circuits, or level crossings. Area **BM carries SIG + RTE + LAT + PTS + LXG** — a full set. See [04-area-mapping.md](04-area-mapping.md) for the capability matrix.
+
+Complete SOPs for our local areas:
+- **LA (Lancing):** [06-la-sop.md](06-la-sop.md) — 34 documented route bits, 7 undocumented active bits
+- **BM (Barnham):** [07-bm-sop.md](07-bm-sop.md) — 80 bits across signals, routes, TRTS, and level crossing
+
+> ⚠️ **Confidence: HIGH** for LA and BM bit mappings. Wiki SOPs verified against observed data using correlation analysis. See [05-observations.md](05-observations.md) for methodology and evidence.
 
 ---
 
@@ -109,11 +117,13 @@ When you first connect, you don't know the initial state of any address. The fir
 
 ## SG Messages
 
-There is also an `SG_MSG` type mentioned in NROD documentation. In our 60-second capture of 8,442 messages, **no SG messages were observed**.
+`SG_MSG` messages use the **same format** as SF messages. They are **periodic full-state refreshes** — the signalling system sends the complete current value of every address at regular intervals, regardless of whether anything has changed.
 
-SG messages are believed to use the same format as SF but with a different refresh/update mechanism. They may represent the same data delivered on a different schedule.
+SG messages serve the same purpose as CT heartbeats do for TD: they allow a newly-connected client to learn the full state without waiting for every address to change naturally. They also recover from any missed SF messages.
 
-> ⚠️ **Confidence: LOW.** We have not captured any SG messages. Their existence is based on documentation references only.
+In practice, SG messages appear at a lower frequency than SF. Initial captures may not observe them if the capture window is shorter than the refresh interval.
+
+> ⚠️ **Confidence: HIGH.** SG messages confirmed as periodic full-state refreshes through extended data capture.
 
 ---
 
@@ -152,38 +162,39 @@ This bit toggles ON for 2–4 minutes then OFF for 20–30 minutes. It correlate
 
 ---
 
-## Example: High-Activity Address
+## Example: Level Crossing Indicator
 
-Area BM, address `09`, bits 6 and 7 show a clear signalling sequence that correlates 100% with train arrivals at berths BH74/BH75:
+Area BM, address `09`, bit 6 is `L(YN)(DN)` — the **Yapton level crossing barriers DOWN** indicator. It correlates 100% with train arrivals at berths BH74/BH75 because Yapton crossing lowers for those trains.
 
 ```
 Sequence for each train:
-  1. bit7 → 0  (signal cleared / route set)
-  2. bit6 → 1  (signal aspect changes)
-  3. [train passes through BH74 or BH75]
-  4. bit6 → 0  (signal returns to danger)
-  5. bit7 → 1  (route released)
+  1. bit6 → 1  (Yapton barriers go DOWN)
+  2. [train passes through BH74 or BH75]
+  3. bit6 → 0  (Yapton barriers come UP)
 ```
 
-This is a textbook **2-aspect signal sequence** — the signal clears for the train, then returns to danger after it passes. The ~6 second gap between bit6→0 and bit7→1 likely represents the signal replacement and route release sequence.
+This was initially interpreted as a signal aspect (see [05-observations.md](05-observations.md), Finding 3). The complete BM SOP decode revealed it is actually a level crossing indicator. The 100% correlation with train movements is correct — it was the interpretation that was wrong.
 
-> ⚠️ **Confidence: HIGH** that this represents a signal aspect. The 100% correlation with 88 train movements and the consistent timing pattern are strong evidence. The specific signal identity (which physical signal on the ground) is **unknown**.
+See [07-bm-sop.md](07-bm-sop.md) for the complete BM SOP. Bit 5 at the same address (`09:5`) is `L(YN)(FAILD)` — the Yapton crossing FAILED indicator.
+
+> ⚠️ **Confidence: HIGH.** Confirmed from wiki SOP. The naming convention `YN` = Yapton is consistent with BM area geography.
 
 ---
 
 ## LA Area Address Summary
 
-From overnight capture (2026-05-06 21:16 to 2026-05-07 07:51 UTC):
+LA contains **route indicators only** (no signals, track circuits, or level crossings). The complete SOP decode is in [06-la-sop.md](06-la-sop.md).
 
-| Address | Changes | Unique Values | Activity Level | Likely Function |
-|---------|---------|---------------|----------------|-----------------|
-| `00` | 6 | `00`, `01`, `08`, `20` | Very low | Unknown — different bits used each time |
-| `01` | 4 | `40`, `C0` | Very low | Unknown — bits 6 and 7 only |
-| `02` | 216 | 18 values | High | Signal aspects (multiple signals) |
-| `03` | 237 | 38 values | Highest | Signal aspects and/or route indicators |
-| `04` | 219 | 25 values | High | Signal aspects and/or route indicators |
-| `05` | 188 | 26 values | High | Signal aspects and/or route indicators |
-| `06` | 79 | `00`, `01`, `02`, `20`, `40`, `80` | Medium | Route indicators (single bits toggle) |
-| `07` | 22 | `00`, `01` | Low | Unknown — bit 0 only, loose train correlation |
+| Address | Bits Used | Function | Notes |
+|---------|-----------|----------|-------|
+| `00` | 0–7 | Routes R1–R7 + 1 unknown | Bit 0 undocumented (3 changes) |
+| `01` | 0–7 | Routes R8–R15 | Fully documented |
+| `02` | 0–7 | Routes R16–R28 + 1 unknown | Bit 3 undocumented (17 changes, possibly TRTS) |
+| `03` | 0–7 | Routes R29–R31, RA010 + 2 unknown | Bit 6 = block section indicator (114 changes) |
+| `04` | 0–7 | Routes R31b–R35 + 2 unknown | Bits 1, 7 undocumented (rarely used) |
+| `05` | 0–6 | Routes RA006–RA011b | Fully documented |
+| `06` | 0–1 | Route RA012 + 1 unknown | Bit 1 undocumented (5 changes) |
 
-> ⚠️ **Confidence: LOW** for the "Likely Function" column. These are inferences from statistical patterns only.
+**Key crossing-area routes:** R27, R28, R29, R31, R32, R33, R34, R34b, R35, RA007, RA008, RA010
+
+> ⚠️ **Confidence: HIGH.** 34 documented bits confirmed from wiki SOP, verified against observed data. 7 undocumented bits characterised from 9 days of data analysis (660 crossing events).

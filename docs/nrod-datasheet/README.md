@@ -11,6 +11,8 @@ Network Rail Open Data (NROD) datasheet for the Roundstone Crossing project. Thi
 | [03-sf-messages.md](03-sf-messages.md) | Signalling Function (SF) messages — bit-level signalling state |
 | [04-area-mapping.md](04-area-mapping.md) | TD area codes, berth numbering, and our local area map |
 | [05-observations.md](05-observations.md) | Findings from our signal logging experiments |
+| [06-la-sop.md](06-la-sop.md) | LA (Lancing) Signalling Output Plan — complete bit decode |
+| [07-bm-sop.md](07-bm-sop.md) | BM (Barnham) Signalling Output Plan — complete bit decode |
 
 ## Quick Reference
 

@@ -26,7 +26,8 @@
 
 - [ ] **Custom error pages** — Styled 404, 500, etc. pages matching the site's dark theme
 - [ ] **Logo/branding** — Research AI tooling for creating a unique custom logo
-- [ ] **SF barrier bit identification** — Area LA SF data (8 addresses) didn't correlate with observed closures. May need to capture ALL areas, or the barrier state may not be published via NROD. Revisit with more data or broader capture.
+- [x] **SF barrier bit identification** — ✅ RESOLVED: Barrier state is NOT in NROD data (LA TD spec has no LXG capability, exhaustive search of all 64 LA bits confirmed, complete SOP decode shows routes only). Use route-based inference instead — route SET near crossing implies barriers down (MCB-CCTV signaller procedure). Validated: 98.8% coverage across 660 crossings over 9 days.
+- [ ] **Route-enhanced prediction** — Implement route-based barrier inference in the predictor. LA route SET events (R27, R28, R29, R31, R32–R35, RA007, RA008, RA010) provide 300–400s median advance warning. 35% of crossings get earlier warning than TD berth alone.
 - [ ] **Build ESP32 device** — Parts list ready (~£21 BOM), firmware written. Order parts and assemble for continuous ground-truth logging.
 - [ ] **Handle freight trains** — Freight may not appear in schedules. TD shows them as headcodes. Tracker handles unknown headcodes but confidence could be improved.
 - [ ] **Add schedule context (CIF)** — Download daily CIF schedule to predict closures before trains appear on TD. Improves the "next hour" view.

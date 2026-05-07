@@ -14,6 +14,21 @@ Each TD message includes a 2-character `area_id` that identifies the signalling 
 
 > ⚠️ **Confidence: HIGH** for LA/LG and BM/BH mapping (confirmed by matching berth names in data vs diagram). **MEDIUM** for ZH/AR (fewer data points).
 
+### TD Capability Matrix
+
+Each TD area has a specification that defines which data types its SF messages carry. This is critical for understanding what information is (and isn't) available in each area.
+
+| Area | SIG | RTE | TRK | PTS | LXG | LAT | Notes |
+|------|-----|-----|-----|-----|-----|-----|-------|
+| **LA** (Lancing) | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ | **Routes only** — no barrier state possible |
+| **BM** (Barnham DTD) | ✅ | ✅ | ❌ | ✅ | ✅ | ✅ | Full set — includes Yapton crossing LXG |
+
+Source: [List of Train Describers](https://wiki.openraildata.com/index.php/List_of_Train_Describers) wiki page.
+
+**Key implication:** LA's SF data contains only route indicators. There is no signal, track circuit, or level crossing data in area LA. This is why exhaustive analysis of all 64 LA bits found no barrier correlation — the barrier state simply isn't in the data. See [06-la-sop.md](06-la-sop.md) for the complete LA SOP and [07-bm-sop.md](07-bm-sop.md) for BM.
+
+> ⚠️ **Confidence: HIGH.** Confirmed from the Open Rail Data wiki and validated against observed data (LA bits are all routes, BM bits include signals, routes, TRTS, and level crossing indicators).
+
 ### Other Areas Observed
 
 In a 60-second capture, **188 unique TD areas** were seen across the entire national network. We only subscribe to all areas via `TD_ALL_SIG_AREA` — there is no way to subscribe to a single area.

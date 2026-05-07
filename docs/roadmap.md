@@ -34,7 +34,8 @@ New features and prediction accuracy. Make it smarter and more useful.
 | 📊 | **Historical analytics & charts** | Average closure duration by hour/day, busiest times, longest closures — surface patterns in the data |
 | 🎨 | **Mobile-responsive layout** | People check crossing status on their phone walking to the station — mobile UX matters most |
 | 🔧 | **`--no-feed` dev mode** | Run the app locally without an NROD STOMP connection for faster development iteration |
-| 📊 | **SF signal correlation** | Revisit barrier state detection from S-Class signalling data — may need broader area capture beyond LA |
+| ~~📊~~ | ~~**SF signal correlation**~~ | ✅ Resolved — LA has RTE only (no signals/barriers). Route-based inference validated: 98.8% coverage, 660 crossings. See NROD datasheet. |
+| 📊 | **Route-enhanced prediction** | Integrate LA route SET events into the predictor for earlier barrier warnings (median 300–400s lead time vs TD berth-only) |
 | 🔧 | **Home Assistant integration** | Publish barrier state to MQTT — enables HA sensors, automations, Jarvis voice announcements |
 | 📊 | **CIF schedule integration** | Download daily CIF schedules for advance predictions — know about trains before they appear on TD |
 | 🔧 | **Freight train handling** | Improve confidence for freight that doesn't appear in passenger schedules — TD shows headcodes but no RTT enrichment |

@@ -51,7 +51,7 @@ Build a system to monitor the Roundstone Level Crossing in Angmering, integrate 
 ## 📡 Data Sources & APIs
 
 ### Key Finding
-> **There is NO public API that exposes live level crossing barrier state (open/closed).** Barrier status must be **inferred** from train position data. This is confirmed across all sources — Network Rail, NRE, community projects, and the Level Crossing App (which states "no current live closure resource available").
+> **There is NO public API that exposes live level crossing barrier state (open/closed).** Barrier status must be **inferred** from train position and route data. This is confirmed across all sources — Network Rail, NRE, community projects, the Level Crossing App, and our own exhaustive analysis of S-Class signalling data (see [NROD datasheet](nrod-datasheet/05-observations.md)). The LA Train Describer specification carries routes only (no LXG capability), and route SET events provide indirect barrier inference for MCB-CCTV crossings.
 
 ### Available Protocols (Network Rail datafeeds)
 | Protocol | Port | Notes |
@@ -306,7 +306,7 @@ None of the existing integrations handle **level crossing prediction**. This wou
   - **Goring side (eastbound approach)**: 0032, 0033, 0034, 0035
   - **Crossing zone**: 0036, 0037
   - **Angmering side (westbound approach)**: 0038, 0039, 0040, 0041
-- S-class signalling: 8 addresses seen in area LA (03, 04, 06, 07, 0A, 0B, 0D, 0E)
+- S-class signalling: 7 addresses actively used in area LA (00–06). **All bits are route indicators (RTE)** — confirmed by wiki SOP and TD capability matrix. Address 07 has minimal activity (infrastructure indicator). See [NROD datasheet](nrod-datasheet/06-la-sop.md) for complete decode.
 
 ---
 
@@ -368,7 +368,8 @@ Python Service (roundstone-crossing)
 2. ~~Identify exact TD berths~~ ✅ Done (area LA, berths 0032-0041)
 3. ~~Build Python service~~ ✅ Done — live tracker + inferrer + API + web dashboard
 4. ~~Test predictions~~ ✅ Calibrated from 4 days of manual observations
-5. **Identify SF barrier bit** — Area LA S-class data didn't correlate; may need broader capture
+5. **Identify SF barrier bit** — ✅ Resolved: barrier NOT in NROD. LA has RTE only, no LXG. Use route-based inference instead.
+6. **Implement route-enhanced prediction** — Route SET events give 300–400s advance warning. 98.8% coverage validated.
 6. **Build ESP32 device** — Parts list and firmware ready, needs assembly for continuous logging
 7. **CIF schedule integration** — Advance prediction before trains appear on TD
 8. **Home Assistant** — MQTT sensors, notifications, Jarvis voice, MagicMirror widget
@@ -395,9 +396,10 @@ Python Service (roundstone-crossing)
 ---
 
 ## 📝 Notes
-- No public API directly exposes "crossing open/closed" — this must be inferred from train positions
-- MCB-CCTV crossings like Roundstone are operated by a human signaller — there's inherent variability in closure duration
-- The 5+ minute closures are a known complaint — this project could quantify the actual average
+- No public API directly exposes "crossing open/closed" — this must be inferred from train positions and route data
+- MCB-CCTV crossings like Roundstone are operated by a human signaller — route SET events confirm barriers are down (signaller must lower and verify via CCTV before setting route)
+- LA TD spec has no LXG capability — barrier state is in local interlocking only, not fed to Train Describer
+- Route-based inference validated: 98.8% coverage across 660 crossings, 35% get earlier warning than TD berth alone
 - TD berth data is the gold standard for accuracy but requires more setup
 - Darwin API is simpler but gives ~1-2 minute accuracy at best
 - Could potentially log all closure events to build a historical dataset and find patterns
