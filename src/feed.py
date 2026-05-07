@@ -21,9 +21,11 @@ logger = logging.getLogger("crossing.feed")
 class NRODListener(stomp.ConnectionListener):
     """Handles incoming STOMP messages from Network Rail."""
 
-    def __init__(self, tracker: TrainTracker, history=None, on_message_callback=None, on_disconnect_callback=None):
+    def __init__(self, tracker: TrainTracker, history=None, route_monitor=None,
+                 on_message_callback=None, on_disconnect_callback=None):
         self.tracker = tracker
         self.history = history
+        self.route_monitor = route_monitor
         self.on_message_callback = on_message_callback
         self.on_disconnect_callback = on_disconnect_callback
         self.connected = False
@@ -65,6 +67,8 @@ class NRODListener(stomp.ConnectionListener):
     def on_disconnected(self):
         self.connected = False
         logger.warning("Disconnected from NROD")
+        if self.route_monitor:
+            self.route_monitor.handle_disconnect()
         if self.on_disconnect_callback:
             self.on_disconnect_callback()
 
@@ -87,6 +91,8 @@ class NRODListener(stomp.ConnectionListener):
             if "SH_MSG" in msg:
                 area = msg["SH_MSG"].get("area_id", "")
                 logger.debug(f"SG refresh complete for area {area}")
+                if self.route_monitor:
+                    self.route_monitor.handle_refresh_complete(area)
             if "CT_MSG" in msg:
                 self.last_heartbeat = datetime.now(timezone.utc)
 
@@ -136,6 +142,11 @@ class NRODListener(stomp.ConnectionListener):
         """S-Class signalling message (SF update or SG refresh)."""
         area = data.get("area_id", "")
         self._record_sf(area, data)
+        if self.route_monitor:
+            address = data.get("address", "")
+            sf_data = data.get("data", "")
+            if address and sf_data:
+                self.route_monitor.handle_sf_update(area, address, sf_data)
         if msg_type == "SG_MSG":
             address = data.get("address", "")
             logger.debug(f"SG refresh: area={area} addr={address}")
@@ -201,9 +212,14 @@ class NRODListener(stomp.ConnectionListener):
 class NRODFeed:
     """Manages the STOMP connection to Network Rail Open Data."""
 
-    def __init__(self, tracker: TrainTracker, history=None, on_message_callback=None):
+    def __init__(self, tracker: TrainTracker, history=None, route_monitor=None,
+                 on_message_callback=None):
         self.tracker = tracker
-        self.listener = NRODListener(tracker, history=history, on_message_callback=on_message_callback, on_disconnect_callback=self._reconnect)
+        self.listener = NRODListener(
+            tracker, history=history, route_monitor=route_monitor,
+            on_message_callback=on_message_callback,
+            on_disconnect_callback=self._reconnect,
+        )
         self.connection: stomp.Connection | None = None
         self._running = False
         self._reconnect_backoffs = [5, 10, 30, 60, 120]

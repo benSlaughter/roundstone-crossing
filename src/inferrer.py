@@ -12,7 +12,7 @@ logger = logging.getLogger("crossing.inferrer")
 
 
 class CrossingInferrer:
-    """Infers crossing barrier state from tracked trains."""
+    """Infers crossing barrier state from tracked trains and route data."""
 
     def __init__(self, config: dict):
         self.config = config
@@ -20,12 +20,22 @@ class CrossingInferrer:
         self._timing = config.get("timing", {})
         self._last_clear_time: datetime | None = None
 
-    def update(self, active_trains: list[TrackedTrain], last_feed_time: datetime | None):
-        """Re-derive crossing state from the current set of active trains."""
+    def update(self, active_trains: list[TrackedTrain], last_feed_time: datetime | None,
+               active_routes: list[str] | None = None):
+        """Re-derive crossing state from the current set of active trains and route state.
+
+        Args:
+            active_trains: Currently tracked trains near the crossing.
+            last_feed_time: Timestamp of last received feed message.
+            active_routes: List of crossing route names currently SET (from RouteMonitor).
+                          None means route data unavailable (backward compat).
+        """
         now = datetime.now(timezone.utc)
         old_state = self.status.state
         self.status.active_trains = active_trains
         self.status.last_feed_message = last_feed_time
+        routes = active_routes or []
+        has_routes = len(routes) > 0
 
         # Check for stale data
         stale_threshold = self._timing.get("stale_threshold_secs", 300)
@@ -34,6 +44,12 @@ class CrossingInferrer:
             return self.status
 
         if not active_trains:
+            if has_routes:
+                # No trains visible but routes are still SET — barriers likely still down
+                # This catches the gap between route SET and train appearing in our zone
+                self._transition(CrossingState.CLOSING_PREDICTED, confidence=0.7)
+                return self.status
+
             # Check if we just cleared — show OPENING_PREDICTED briefly
             post_clearance = self._timing.get("post_clearance_secs", 15)
             if (self._last_clear_time
@@ -57,28 +73,46 @@ class CrossingInferrer:
 
         if TrainPhase.AT_CROSSING in phases:
             # Train is at the crossing — barriers almost certainly down
-            self._transition(CrossingState.CLOSED_INFERRED, confidence=0.9)
+            confidence = 0.95 if has_routes else 0.9
+            self._transition(CrossingState.CLOSED_INFERRED, confidence=confidence)
             self._last_clear_time = now
             self.status.predicted_change = self._predict_opening(active_trains)
             self.status.predicted_next_state = CrossingState.OPENING_PREDICTED
 
         elif was_closed:
-            # Barriers already down — keep them down while any trains remain
-            self._transition(CrossingState.CLOSED_INFERRED, confidence=0.85)
+            # Barriers already down — keep them down while trains or routes remain active
+            confidence = 0.9 if has_routes else 0.85
+            self._transition(CrossingState.CLOSED_INFERRED, confidence=confidence)
             self._last_clear_time = now
             self.status.predicted_change = self._predict_opening(active_trains)
             self.status.predicted_next_state = CrossingState.OPENING_PREDICTED
 
+        elif (TrainPhase.STRIKE_IN in phases or TrainPhase.AT_STATION in phases) and has_routes:
+            # Strike-in/station AND route SET — barriers ARE down (MCB-CCTV procedure)
+            self._transition(CrossingState.CLOSED_INFERRED, confidence=0.9)
+            self._last_clear_time = now
+            nearest = (self._nearest_train(active_trains, TrainPhase.STRIKE_IN)
+                       or self._nearest_train(active_trains, TrainPhase.AT_STATION))
+            self.status.predicted_change = self._predict_opening(active_trains)
+            self.status.predicted_next_state = CrossingState.OPENING_PREDICTED
+
         elif TrainPhase.STRIKE_IN in phases or TrainPhase.AT_STATION in phases:
-            # Train in strike-in zone or at a station before the crossing
+            # Strike-in without route data — same as before
             nearest = (self._nearest_train(active_trains, TrainPhase.STRIKE_IN)
                        or self._nearest_train(active_trains, TrainPhase.AT_STATION))
             self._transition(CrossingState.CLOSING_PREDICTED, confidence=0.8)
             self.status.predicted_change = nearest.predicted_at_crossing if nearest else None
             self.status.predicted_next_state = CrossingState.CLOSED_INFERRED
 
+        elif TrainPhase.APPROACHING in phases and has_routes:
+            # Approaching train with route SET — barriers likely lowering already
+            nearest = self._nearest_train(active_trains, TrainPhase.APPROACHING)
+            self._transition(CrossingState.CLOSING_PREDICTED, confidence=0.85)
+            self.status.predicted_change = nearest.predicted_at_crossing if nearest else None
+            self.status.predicted_next_state = CrossingState.CLOSED_INFERRED
+
         elif TrainPhase.APPROACHING in phases:
-            # Train approaching but not yet in strike-in
+            # Train approaching but not yet in strike-in (no route info)
             nearest = self._nearest_train(active_trains, TrainPhase.APPROACHING)
             pre_closure = self._timing.get("pre_closure_secs", 120)
 
@@ -102,9 +136,10 @@ class CrossingInferrer:
             self._transition(CrossingState.OPEN, confidence=0.7)
 
         if self.status.state != old_state:
+            route_str = f", routes={len(routes)}" if routes else ""
             logger.info(f"Crossing: {old_state.value} -> {self.status.state.value} "
                         f"(confidence={self.status.confidence:.1%}, "
-                        f"trains={len(active_trains)})")
+                        f"trains={len(active_trains)}{route_str})")
 
         return self.status
 

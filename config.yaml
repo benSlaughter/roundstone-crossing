@@ -145,6 +145,29 @@ station_berths:
     entry: 93      # east side (train enters from east)
     platform: 83   # at station
 
+# S-Class route monitoring — LA route bits near the crossing
+# Route SET implies barriers are down (MCB-CCTV: signaller lowers barriers before setting route)
+# Validated: 98.8% coverage across 660 crossings over 9 days
+# Bit numbering: 0 = LSB (bit 0 of the byte), 7 = MSB
+routes:
+  crossing_routes:
+    # East side routes (signals east of crossing, berths 0032-0035)
+    - { address: "02", bit: 6, name: "R27", side: "east" }
+    - { address: "02", bit: 7, name: "R28", side: "east" }
+    - { address: "03", bit: 0, name: "R29", side: "east" }
+    - { address: "03", bit: 7, name: "R31", side: "east" }
+    - { address: "04", bit: 0, name: "R31b", side: "east" }
+    - { address: "04", bit: 2, name: "R32", side: "east" }
+    - { address: "04", bit: 3, name: "R33", side: "east" }
+    - { address: "04", bit: 4, name: "R34", side: "east" }
+    - { address: "04", bit: 5, name: "R34b", side: "east" }
+    - { address: "04", bit: 6, name: "R35", side: "east" }
+    # West side routes (signals west of crossing, A-prefix berths)
+    - { address: "05", bit: 1, name: "RA007", side: "west" }
+    - { address: "05", bit: 2, name: "RA008", side: "west" }
+    - { address: "03", bit: 4, name: "RA010", side: "west" }
+    - { address: "03", bit: 5, name: "RA010b", side: "west" }
+
 # Realtime Trains API — platform-level station data
 rtt:
   stations: ["ANG", "GBS"]    # CRS codes to poll (ANG=Angmering, GBS=Goring-by-Sea)

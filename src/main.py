@@ -75,11 +75,13 @@ def run_predictor(config: dict, with_api: bool = False):
     from .history import HistoryLogger
     from .feed import NRODFeed
     from .rtt import RTTClient
+    from .route_monitor import RouteMonitor
     from .models import TrainPhase
 
     tracker = TrainTracker(config)
     inferrer = CrossingInferrer(config)
     history = HistoryLogger()
+    route_monitor = RouteMonitor(config)
     tracker.history = history
 
     last_feed_time = None
@@ -88,7 +90,8 @@ def run_predictor(config: dict, with_api: bool = False):
         nonlocal last_feed_time
         last_feed_time = ts
 
-    feed = NRODFeed(tracker, history=history, on_message_callback=on_feed_message)
+    feed = NRODFeed(tracker, history=history, route_monitor=route_monitor,
+                    on_message_callback=on_feed_message)
 
     # Start RTT polling
     rtt_config = config.get("rtt", {})
@@ -120,9 +123,10 @@ def run_predictor(config: dict, with_api: bool = False):
 
     try:
         while True:
-            # Get active trains and update crossing state
+            # Get active trains and route state, update crossing state
             active = tracker.get_active_trains()
-            status = inferrer.update(active, last_feed_time)
+            routes = route_monitor.active_route_names()
+            status = inferrer.update(active, last_feed_time, routes)
 
             # Log state changes
             if status.state != prev_state:

@@ -376,3 +376,53 @@ class TestConnectionCallbacks:
         frame = MagicMock()
         frame.body = "some error"
         listener.on_error(frame)  # should not raise
+
+
+# ── Route monitor integration ────────────────────────────────────────
+
+class TestRouteMonitorIntegration:
+    """Tests that SF messages are dispatched to the route monitor."""
+
+    @pytest.fixture
+    def mock_route_monitor(self):
+        return MagicMock()
+
+    @pytest.fixture
+    def listener_with_routes(self, mock_tracker, mock_route_monitor):
+        return NRODListener(mock_tracker, route_monitor=mock_route_monitor)
+
+    def test_sf_msg_dispatched_to_route_monitor(self, listener_with_routes, mock_route_monitor):
+        messages = [{"SF_MSG": {
+            "area_id": "LA", "address": "04", "data": "40",
+        }}]
+        listener_with_routes._handle_td(messages)
+        mock_route_monitor.handle_sf_update.assert_called_once_with("LA", "04", "40")
+
+    def test_sg_msg_dispatched_to_route_monitor(self, listener_with_routes, mock_route_monitor):
+        messages = [{"SG_MSG": {
+            "area_id": "LA", "address": "04", "data": "40",
+        }}]
+        listener_with_routes._handle_td(messages)
+        mock_route_monitor.handle_sf_update.assert_called_once_with("LA", "04", "40")
+
+    def test_sh_msg_dispatched_to_route_monitor(self, listener_with_routes, mock_route_monitor):
+        messages = [{"SH_MSG": {"area_id": "LA"}}]
+        listener_with_routes._handle_td(messages)
+        mock_route_monitor.handle_refresh_complete.assert_called_once_with("LA")
+
+    def test_disconnect_clears_route_monitor(self, listener_with_routes, mock_route_monitor):
+        listener_with_routes.connected = True
+        listener_with_routes.on_disconnected()
+        mock_route_monitor.handle_disconnect.assert_called_once()
+
+    def test_sf_msg_missing_data_not_dispatched(self, listener_with_routes, mock_route_monitor):
+        messages = [{"SF_MSG": {"area_id": "LA", "address": "", "data": "40"}}]
+        listener_with_routes._handle_td(messages)
+        mock_route_monitor.handle_sf_update.assert_not_called()
+
+    def test_no_route_monitor_no_crash(self, listener):
+        """Listener without route_monitor should handle SF without error."""
+        messages = [{"SF_MSG": {
+            "area_id": "LA", "address": "04", "data": "40",
+        }}]
+        listener._handle_td(messages)  # should not raise
