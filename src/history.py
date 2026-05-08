@@ -2,9 +2,10 @@
 Historical logger — stores every crossing state change and train passage in SQLite.
 """
 
-import sqlite3
 import logging
 import os
+import sqlite3
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -16,13 +17,37 @@ DB_PATH = Path(os.environ.get("CROSSING_DB_PATH", str(Path(__file__).parent.pare
 
 
 class HistoryLogger:
-    """Logs crossing state intervals and train passages to SQLite."""
+    """Logs crossing state intervals and train passages to SQLite.
+
+    Thread-safety
+    -------------
+    SQLite-level concurrency is handled per-connection (each method opens
+    its own connection with `busy_timeout` set). The Python-level state
+    (`_current_interval_id`, `_current_state`) is protected by `_lock` —
+    necessary because `log_state_change()` is called from at least three
+    threads in production (main loop, NROD feed listener, FastAPI handlers
+    via the route_monitor's SF callbacks).
+    """
 
     def __init__(self, db_path: Path = DB_PATH):
         self.db_path = db_path
+        # Lock guards _current_interval_id and _current_state. SQLite handles
+        # its own connection-level concurrency separately.
+        self._lock = threading.Lock()
         self._init_db()
         self._current_interval_id: int | None = None
         self._current_state: CrossingState | None = None
+
+        # Close any state intervals left unclosed by a previous logger
+        # lifecycle (e.g. app restart, container redeploy). Without this,
+        # restarts accumulate "open-ended" rows that confuse downstream
+        # analysis (every restart leaves behind a row with ended_at=NULL,
+        # and a fresh logger would happily insert a new interval over the
+        # top of it). We can't reconstruct what the predictor was inferring
+        # during the gap, so we close at startup time and let the next
+        # log_state_change() open a fresh interval naturally — this records
+        # the gap honestly rather than pretending continuity.
+        self._close_orphaned_intervals_at_startup()
 
     def _connect(self) -> sqlite3.Connection:
         """Create a DB connection with consistent settings."""
@@ -127,6 +152,36 @@ class HistoryLogger:
         db.close()
         logger.info(f"History database: {self.db_path}")
 
+    def _close_orphaned_intervals_at_startup(self):
+        """Close any state_intervals rows left with `ended_at` NULL.
+
+        Each such row represents an interval that the previous logger
+        instance opened but never closed (typically because the process was
+        killed/restarted before the next state transition). Without this
+        cleanup, downstream analysis sees overlapping intervals and the
+        next `log_state_change()` would create a third row covering the
+        same period.
+        """
+        now = datetime.now(timezone.utc).isoformat()
+        db = self._connect()
+        try:
+            cursor = db.execute(
+                "UPDATE state_intervals SET "
+                "ended_at = ?, "
+                "duration_secs = (julianday(?) - julianday(started_at)) * 86400 "
+                "WHERE ended_at IS NULL",
+                (now, now),
+            )
+            n = cursor.rowcount
+            db.commit()
+            if n > 0:
+                logger.info(
+                    f"Closed {n} orphaned state interval(s) at startup "
+                    "(prior process restart left them open-ended)"
+                )
+        finally:
+            db.close()
+
     def log_state_change(self, status: CrossingStatus):
         """Log a crossing state transition.
 
@@ -134,33 +189,42 @@ class HistoryLogger:
         with the current state's reason. The reason is captured at insert time
         only — re-asserting the same state on subsequent ticks does not update
         the stored reason (it always describes why the state was first entered).
+
+        Thread-safe: wrapped in `_lock` because `_current_interval_id` and
+        `_current_state` are read and written across threads (main loop +
+        feed listener + API handlers via route_monitor). The timestamp is
+        captured inside the lock so concurrent calls produce monotonically
+        increasing intervals (no negative durations).
         """
-        now = datetime.now(timezone.utc).isoformat()
         db = self._connect()
+        try:
+            with self._lock:
+                now = datetime.now(timezone.utc).isoformat()
 
-        # Close previous interval
-        if self._current_interval_id and self._current_state != status.state:
-            db.execute(
-                "UPDATE state_intervals SET ended_at = ?, duration_secs = "
-                "(julianday(?) - julianday(started_at)) * 86400 WHERE id = ?",
-                (now, now, self._current_interval_id),
-            )
+                # Close previous interval
+                if self._current_interval_id and self._current_state != status.state:
+                    db.execute(
+                        "UPDATE state_intervals SET ended_at = ?, duration_secs = "
+                        "(julianday(?) - julianday(started_at)) * 86400 WHERE id = ?",
+                        (now, now, self._current_interval_id),
+                    )
 
-        # Open new interval
-        if self._current_state != status.state:
-            cursor = db.execute(
-                "INSERT INTO state_intervals "
-                "(state, confidence, started_at, active_train_count, reason) "
-                "VALUES (?, ?, ?, ?, ?)",
-                (status.state.value, status.confidence, now,
-                 len(status.active_trains), status.reason),
-            )
-            self._current_interval_id = cursor.lastrowid
-            self._current_state = status.state
-            logger.debug(f"Logged state: {status.state.value} (interval #{self._current_interval_id}) — {status.reason}")
+                # Open new interval
+                if self._current_state != status.state:
+                    cursor = db.execute(
+                        "INSERT INTO state_intervals "
+                        "(state, confidence, started_at, active_train_count, reason) "
+                        "VALUES (?, ?, ?, ?, ?)",
+                        (status.state.value, status.confidence, now,
+                         len(status.active_trains), status.reason),
+                    )
+                    self._current_interval_id = cursor.lastrowid
+                    self._current_state = status.state
+                    logger.debug(f"Logged state: {status.state.value} (interval #{self._current_interval_id}) — {status.reason}")
 
-        db.commit()
-        db.close()
+                db.commit()
+        finally:
+            db.close()
 
     def log_train_passage(self, train: TrackedTrain):
         """Log a complete train passage (when train clears the crossing).

@@ -139,6 +139,172 @@ class TestLogStateChange:
 
 
 # ---------------------------------------------------------------------------
+# 2b. Restart-survival: orphaned-interval cleanup at startup
+# ---------------------------------------------------------------------------
+
+class TestStartupOrphanCleanup:
+    """When the previous logger lifecycle left state_intervals rows with
+    `ended_at = NULL` (e.g. process killed before next state change), a
+    fresh HistoryLogger should close those rows at __init__ time. Without
+    this, restarts accumulate overlapping intervals that confuse downstream
+    analysis (the metric script's loader had to compensate for this — now
+    we fix it at the source).
+    """
+
+    def test_init_closes_unclosed_interval_from_prior_lifecycle(self, tmp_path):
+        from src.history import HistoryLogger
+        db_path = tmp_path / "test.db"
+
+        # Lifecycle 1: open an interval, then "die" without closing
+        with freeze_time("2025-06-15 10:00:00", tz_offset=0):
+            h1 = HistoryLogger(db_path=db_path)
+            h1.log_state_change(CrossingStatus(state=CrossingState.OPEN, confidence=0.9))
+            del h1  # simulate process death (no clean shutdown)
+
+        # Lifecycle 2: fresh logger — should close the orphaned interval
+        with freeze_time("2025-06-15 10:05:00", tz_offset=0):
+            h2 = HistoryLogger(db_path=db_path)
+
+        rows = h2.get_intervals()
+        assert len(rows) == 1
+        # Now closed
+        assert rows[0]["ended_at"] is not None
+        assert rows[0]["duration_secs"] == pytest.approx(300, abs=2)  # 5 min gap
+
+    def test_init_closes_multiple_orphans(self, tmp_path):
+        """If somehow multiple unclosed rows exist (older bug, manual import),
+        all should be closed at startup."""
+        import sqlite3
+        from src.history import HistoryLogger
+        db_path = tmp_path / "test.db"
+
+        # Pre-seed multiple unclosed intervals (simulating accumulated cruft)
+        HistoryLogger(db_path=db_path)  # ensure schema exists
+        db = sqlite3.connect(str(db_path))
+        for state, ts in [
+            ("open",            "2025-06-15T10:00:00+00:00"),
+            ("closed_inferred", "2025-06-15T10:05:00+00:00"),
+            ("open",            "2025-06-15T10:10:00+00:00"),
+        ]:
+            db.execute(
+                "INSERT INTO state_intervals (state, started_at, ended_at) VALUES (?, ?, NULL)",
+                (state, ts),
+            )
+        db.commit()
+        db.close()
+
+        # Reopen — should close all three
+        with freeze_time("2025-06-15 10:15:00", tz_offset=0):
+            HistoryLogger(db_path=db_path)
+
+        db = sqlite3.connect(str(db_path))
+        unclosed = db.execute("SELECT COUNT(*) FROM state_intervals WHERE ended_at IS NULL").fetchone()[0]
+        db.close()
+        assert unclosed == 0
+
+    def test_init_with_no_orphans_is_noop(self, tmp_path):
+        """Init on a clean DB doesn't error and doesn't touch any rows."""
+        from src.history import HistoryLogger
+        db_path = tmp_path / "test.db"
+        HistoryLogger(db_path=db_path)
+        # No exceptions; trivial DB exists with no state_intervals rows
+        h2 = HistoryLogger(db_path=db_path)
+        assert h2.get_intervals() == []
+
+    def test_subsequent_state_change_after_restart_creates_new_interval(self, tmp_path):
+        """After startup-cleanup closes the prior interval, the next
+        log_state_change should INSERT a new row (not reopen the old one)
+        — this preserves the gap visibility in history."""
+        from src.history import HistoryLogger
+        db_path = tmp_path / "test.db"
+
+        # Lifecycle 1
+        with freeze_time("2025-06-15 10:00:00", tz_offset=0):
+            h1 = HistoryLogger(db_path=db_path)
+            h1.log_state_change(CrossingStatus(state=CrossingState.OPEN, confidence=0.9))
+            del h1
+
+        # Lifecycle 2: same state as before. Should still create a new interval
+        # (because we honestly don't know what happened during the gap).
+        with freeze_time("2025-06-15 10:05:00", tz_offset=0):
+            h2 = HistoryLogger(db_path=db_path)
+            h2.log_state_change(CrossingStatus(state=CrossingState.OPEN, confidence=0.9))
+
+        rows = h2.get_intervals()
+        assert len(rows) == 2  # NOT 1 — the gap is real
+        # Newest first (DESC)
+        assert rows[0]["ended_at"] is None  # current open interval
+        assert rows[1]["ended_at"] is not None  # closed at startup
+
+
+# ---------------------------------------------------------------------------
+# 2c. Thread-safety: concurrent log_state_change calls
+# ---------------------------------------------------------------------------
+
+class TestThreadSafety:
+    """HistoryLogger is called from multiple threads (main loop + feed
+    listener + API handlers via route_monitor). The shared Python state
+    (_current_interval_id, _current_state) must be lock-protected.
+    """
+
+    def test_concurrent_same_state_does_not_create_duplicates(self, tmp_path):
+        """Many threads calling log_state_change with the same state
+        concurrently should still result in exactly one interval."""
+        import threading
+        from src.history import HistoryLogger
+        db_path = tmp_path / "test.db"
+        h = HistoryLogger(db_path=db_path)
+        status = CrossingStatus(state=CrossingState.OPEN, confidence=0.9)
+
+        barrier = threading.Barrier(20)
+
+        def worker():
+            barrier.wait()  # all threads start at the same instant
+            for _ in range(50):
+                h.log_state_change(status)
+
+        threads = [threading.Thread(target=worker) for _ in range(20)]
+        for t in threads: t.start()
+        for t in threads: t.join()
+
+        rows = h.get_intervals()
+        # Exactly one interval — 1000 calls all collapsed
+        assert len(rows) == 1
+        assert rows[0]["state"] == "open"
+
+    def test_concurrent_alternating_states_consistent(self, tmp_path):
+        """Threads alternating between two states — final _current_state
+        must match the last successfully logged interval."""
+        import threading
+        from src.history import HistoryLogger
+        db_path = tmp_path / "test.db"
+        h = HistoryLogger(db_path=db_path)
+
+        states = [
+            CrossingStatus(state=CrossingState.OPEN, confidence=0.9),
+            CrossingStatus(state=CrossingState.CLOSED_INFERRED, confidence=0.9),
+        ]
+
+        def worker(idx):
+            for i in range(50):
+                h.log_state_change(states[(idx + i) % 2])
+
+        threads = [threading.Thread(target=worker, args=(i,)) for i in range(8)]
+        for t in threads: t.start()
+        for t in threads: t.join()
+
+        # Logger's tracked state matches the most-recently-inserted row.
+        rows = h.get_intervals(limit=1)  # newest first
+        assert rows[0]["state"] == h._current_state.value
+
+        # No row has ended_at < started_at (i.e. duration negative)
+        all_rows = h.get_intervals(limit=1000)
+        for r in all_rows[1:]:  # all except the open one
+            assert r["ended_at"] is not None
+            assert r["duration_secs"] >= 0
+
+
+# ---------------------------------------------------------------------------
 # 3. log_train_passage
 # ---------------------------------------------------------------------------
 
