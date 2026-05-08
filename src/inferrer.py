@@ -18,6 +18,7 @@ class CrossingInferrer:
         self.config = config
         self.status = CrossingStatus()
         self._timing = config.get("timing", {})
+        self._inference = config.get("inference", {})
         self._last_clear_time: datetime | None = None
         # Tracks when the route-only "barriers down" inference began. Used to
         # cap that inference (stuck routes shouldn't keep us locked in CLOSED
@@ -34,11 +35,21 @@ class CrossingInferrer:
             last_feed_time: Timestamp of last received feed message.
             active_routes: List of crossing route names currently SET (from RouteMonitor).
                           None means route data unavailable (backward compat).
+                          Will be ignored entirely if `inference.use_routes` is False.
         """
         now = datetime.now(timezone.utc)
         old_state = self.status.state
         self.status.active_trains = active_trains
         self.status.last_feed_message = last_feed_time
+
+        # Honour the inference.use_routes config flag. When False, routes are
+        # ignored for state derivation entirely (they are still observed,
+        # logged to sf_events and shown on /live — this only affects the
+        # state machine). Default False after production regression where
+        # route-based inference reported CLOSED while barriers were OPEN.
+        if not self._inference.get("use_routes", False):
+            active_routes = None
+
         routes = active_routes or []
         has_routes = len(routes) > 0
 

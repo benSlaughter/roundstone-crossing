@@ -1,10 +1,12 @@
 """Tests for CrossingInferrer state derivation logic."""
 
+import copy
 from datetime import datetime, timedelta, timezone
 
 import pytest
 from freezegun import freeze_time
 
+from src.inferrer import CrossingInferrer
 from src.models import CrossingState, TrainPhase, Direction
 
 NOW = datetime(2025, 6, 15, 10, 30, 0, tzinfo=timezone.utc)
@@ -688,3 +690,74 @@ class TestStateReason:
             status = inferrer.update(trains, feed, active_routes=routes)
             assert status.reason is not None, f"reason missing for state {status.state}"
             assert len(status.reason) > 0, f"reason empty for state {status.state}"
+
+
+@freeze_time(NOW)
+class TestRoutesDisabled:
+    """Tests for inference.use_routes=False (the production default after the
+    2026-05-08 regression, when route-based inference produced false positives).
+
+    With routes disabled, the inferrer must behave identically whether
+    `active_routes` is None, [], or a list of route names — routes are
+    completely ignored for state derivation. Routes are still observed,
+    logged in sf_events, and shown on /live; only their effect on the
+    inferred state is suppressed.
+    """
+
+    @pytest.fixture
+    def routes_off_inferrer(self, test_config):
+        cfg = copy.deepcopy(test_config)
+        cfg.setdefault("inference", {})["use_routes"] = False
+        return CrossingInferrer(cfg)
+
+    def test_routes_only_no_trains_stays_open_when_disabled(self, routes_off_inferrer):
+        """The biggest regression case: routes SET, no train in our zone →
+        previously CLOSING_PREDICTED 0.7. With routes disabled, must stay OPEN."""
+        status = routes_off_inferrer.update([], FEED_RECENT, active_routes=["R35", "RA007"])
+        assert status.state == CrossingState.OPEN
+        assert status.confidence == 0.8
+
+    def test_at_crossing_confidence_unchanged_by_routes(self, routes_off_inferrer, make_train):
+        """AT_CROSSING with routes provided: confidence must be the no-routes value."""
+        train = make_train(phase=TrainPhase.AT_CROSSING)
+        status = routes_off_inferrer.update([train], FEED_RECENT, active_routes=["R35"])
+        assert status.state == CrossingState.CLOSED_INFERRED
+        assert status.confidence == 0.9  # NOT 0.95 (which is the route-boosted value)
+
+    def test_strike_in_with_routes_returns_closing_not_closed(self, routes_off_inferrer, make_train):
+        """STRIKE_IN + route: previously promoted to CLOSED_INFERRED.
+        With routes disabled, must stay CLOSING_PREDICTED."""
+        train = make_train(phase=TrainPhase.STRIKE_IN,
+                           predicted_at_crossing=NOW + timedelta(seconds=60))
+        status = routes_off_inferrer.update([train], FEED_RECENT, active_routes=["R32"])
+        assert status.state == CrossingState.CLOSING_PREDICTED
+        assert status.confidence == 0.8  # no-route value
+
+    def test_approaching_with_routes_uses_pre_closure_logic(self, routes_off_inferrer, make_train):
+        """APPROACHING + route: previously CLOSING_PREDICTED 0.85 regardless of distance.
+        With routes disabled, falls back to pre_closure_secs distance check."""
+        # Far-out train that would have been CLOSING_PREDICTED with routes
+        train = make_train(phase=TrainPhase.APPROACHING,
+                           predicted_at_crossing=NOW + timedelta(seconds=300))
+        status = routes_off_inferrer.update([train], FEED_RECENT, active_routes=["RA007"])
+        # 300s out, pre_closure 120s → outside window → OPEN
+        assert status.state == CrossingState.OPEN
+
+    def test_route_hold_cap_does_not_fire_when_disabled(self, routes_off_inferrer):
+        """Route-hold cap path is dead when routes are disabled — even after
+        many minutes of routes-set state, we stay OPEN (not UNKNOWN)."""
+        with freeze_time(NOW) as frozen:
+            routes_off_inferrer.update([], datetime.now(timezone.utc), active_routes=["R35"])
+            frozen.tick(delta=timedelta(seconds=2000))
+            status = routes_off_inferrer.update([], datetime.now(timezone.utc), active_routes=["R35"])
+            assert status.state == CrossingState.OPEN
+            # not UNKNOWN — the route-hold cap requires routes-only state which
+            # never gets entered when routes are disabled
+
+    def test_reason_does_not_mention_routes_when_disabled(self, routes_off_inferrer, make_train):
+        """The reason string should not mention routes when they're being ignored."""
+        train = make_train(phase=TrainPhase.AT_CROSSING)
+        status = routes_off_inferrer.update([train], FEED_RECENT, active_routes=["R35", "R32"])
+        assert "route" not in status.reason.lower()
+        assert "R35" not in status.reason
+        assert "R32" not in status.reason
