@@ -48,6 +48,57 @@ python experiments/route_prediction_experiment.py --db /path/to/database.db
 
 **Output:** per-train comparison table, summary statistics (lead time, confidence, false positives), and a breakdown of which route triggers provided early warnings.
 
+### `coverage_metric.py`
+
+Time-weighted accuracy metric for the predictor — measures whether the
+inferrer's CLOSED/OPEN claims match reality, where reality is derived from
+real train passages.
+
+**Why it exists:** the `route_prediction_experiment.py` script's "warned earlier
+within 10-min window" metric is biased — it under-counts false positives and
+has window-edge artefacts. We discovered this the hard way when the May 2026
+route-inference change passed the experiment but produced a production
+regression (false-CLOSED reports lasting 15+ minutes). This script gives a
+direct, unbiased answer to the question that matters: **at any given moment,
+did the predictor correctly say what the barriers were doing?**
+
+**Ground truth:** derived from `train_events` rows with `phase='at_crossing'`.
+For every at-crossing observation, barriers must have been down. We expand
+each event into a closure window using the calibrated timing constants
+(default `pre_closure=180s, clearance=10s, post=5s`, matching `config.yaml`),
+then merge overlapping windows. This is a lower bound on real closed time
+(it misses closures with no train: signaller error, stuck routes, road
+maintenance). Phase 2 will swap in device-logged ground truth from the ESP32.
+
+**Predicted-closed states:** by default `closed_inferred`, `closing_predicted`,
+and `opening_predicted` all count as "predicted closed" (because all three
+tell the user "barriers may be down"). Use `--strict` to count only
+`closed_inferred`.
+
+**Usage:**
+```bash
+# Full snapshot
+python experiments/coverage_metric.py data/prod-snapshots/prod-XXXX.db
+
+# Time-bounded comparison (e.g. before vs after a config change)
+python experiments/coverage_metric.py data/prod-snapshots/prod-XXXX.db \
+    --since "2026-05-08T09:18:00+00:00"
+python experiments/coverage_metric.py data/prod-snapshots/prod-XXXX.db \
+    --until "2026-05-08T09:18:00+00:00"
+
+# Strict mode (excludes CLOSING_PREDICTED from "predicted closed")
+python experiments/coverage_metric.py data/prod-snapshots/prod-XXXX.db --strict
+```
+
+**Output:** confusion matrix (TP/FP/TN/FN time totals), precision/recall/
+accuracy/F1, and the largest false-positive and false-negative intervals
+with their associated `reason` (showing exactly which inferrer branch
+produced each error). The FP list is the most actionable output —
+debugging a regression usually starts here.
+
+**Tests:** `tests/test_coverage_metric.py` (13 tests covering ground-truth
+derivation, confusion-matrix computation, edge cases for the loader).
+
 ### `analyse_signals.py`
 
 Earlier exploratory script for correlating SF bit changes with TD berth steps. Used for the initial "Breaking The Code" analysis to identify signal and route bits.

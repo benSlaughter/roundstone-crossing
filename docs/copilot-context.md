@@ -62,7 +62,7 @@ NROD STOMP Feeds (TD + TRUST + SF)
 
 ### ✅ What's Done
 - Full prediction pipeline: feed → tracker → inferrer → API → web dashboard
-- 342 automated tests, all passing (~4s)
+- 355 automated tests, all passing (~4s)
 - S-Class signalling message logging (SF/SG/SH/CT) for future barrier state correlation
 - RTT integration for station-level train enrichment (with tests)
 - Web dashboard with CSS/JS extracted to separate files (`static/style.css`, `static/app.js`)
@@ -115,7 +115,7 @@ NROD STOMP Feeds (TD + TRUST + SF)
 | `static/style.css` | Dashboard styles |
 | `static/app.js` | Dashboard JavaScript |
 | `src/utils.py` | Shared utilities (window merging, helpers) |
-| `tests/` | 342 tests across inferrer, tracker, feed, API, history, RTT, models, route_monitor, security headers |
+| `tests/` | 355 tests across inferrer, tracker, feed, API, history, RTT, models, route_monitor, security headers |
 | `device/` | ESP32-C3 barrier logger (firmware, docs, schematics) |
 | `data/observations/` | Manual crossing observations with accuracy notes |
 | `docs/research.md` | Full research on data sources, APIs, crossing details |
@@ -146,7 +146,7 @@ roundstone-crossing/
 │   ├── live.html                     # Hidden /live debug view (raw data)
 │   ├── live.js                       # Live view JS
 │   └── live.css                      # Live view CSS
-├── tests/                            # Pytest suite (342 tests)
+├── tests/                            # Pytest suite (355 tests)
 │   ├── conftest.py                   # Shared fixtures
 │   ├── test_api.py                   # API endpoint tests
 │   ├── test_feed.py                  # NROD feed/route monitor integration
@@ -236,7 +236,7 @@ roundstone-crossing/
 cd ~/projects/roundstone-crossing
 source .venv/bin/activate
 python -m src.main --api --debug   # predictor + API on 127.0.0.1:8590
-python -m pytest tests/ -v         # run test suite (342 tests, ~4s)
+python -m pytest tests/ -v         # run test suite (355 tests, ~4s)
 ```
 
 The server writes its PID to `server.pid` (gitignored).

@@ -320,6 +320,21 @@ recommendations are all tracked in `docs/TODO.md` or `route_improvements`.
 If the user has time for one thing, do **#1 (state-coverage metric)** — it
 unblocks everything else and would have caught the May→Aug regression.
 
+> **Update (2026-08, post-audit):** ✅ Built. Lives at
+> `experiments/coverage_metric.py` with 13 unit tests (`tests/test_coverage_metric.py`).
+> First run against a 6.5-day prod snapshot:
+>
+> | Window | Precision | Recall | Accuracy | F1 | Notes |
+> |---|---|---|---|---|---|
+> | Before route-disable hotfix (May 1 → 09:18 May 8) | **60.9 %** | 95.9 % | 78.5 % | 74.5 % | The regression — every largest FP interval names a route in its `reason` |
+> | After route-disable hotfix (09:18 May 8 → 09:34 May 8, 16 min) | **78.1 %** | 100 % | 90.8 % | 87.7 % | Tiny window but precision recovered immediately |
+>
+> The metric does exactly what we hoped — directly catches the regression
+> we lived through. Re-run on the next prod snapshot for a more statistically
+> meaningful "after" window. With the metric in hand, the route-improvement
+> roadmap (per-route confidence, adding wiki bits, etc.) is now testable
+> rather than guesswork.
+
 ---
 
 ## Audit history
