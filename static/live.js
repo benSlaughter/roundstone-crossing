@@ -292,9 +292,21 @@ document.getElementById('raw-toggle').addEventListener('click', () => {
 // ── Main poll loop ───────────────────────────────────────────────────
 let zonesRendered = false;
 
+// Forward any ?token=... from the page URL into the /live/data fetch so
+// that admin-protected production deployments can be bookmarked as
+// /live?token=<your-admin-token>.
+const PAGE_TOKEN = new URLSearchParams(window.location.search).get('token');
+const DATA_URL = '/live/data' + (PAGE_TOKEN ? '?token=' + encodeURIComponent(PAGE_TOKEN) : '');
+
 async function poll() {
   try {
-    const r = await fetch('/live/data');
+    const r = await fetch(DATA_URL);
+    if (r.status === 401) {
+      document.getElementById('feed-text').textContent =
+        'Auth required — append ?token=<admin-token> to the URL';
+      document.getElementById('feed-status').className = 'feed-dot disconnected';
+      return;
+    }
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     const data = await r.json();
 

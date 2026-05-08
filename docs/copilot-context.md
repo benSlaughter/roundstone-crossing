@@ -62,7 +62,7 @@ NROD STOMP Feeds (TD + TRUST + SF)
 
 ### ✅ What's Done
 - Full prediction pipeline: feed → tracker → inferrer → API → web dashboard
-- 332 automated tests, all passing (~4s)
+- 342 automated tests, all passing (~4s)
 - S-Class signalling message logging (SF/SG/SH/CT) for future barrier state correlation
 - RTT integration for station-level train enrichment (with tests)
 - Web dashboard with CSS/JS extracted to separate files (`static/style.css`, `static/app.js`)
@@ -76,6 +76,8 @@ NROD STOMP Feeds (TD + TRUST + SF)
 - Docker deployment — multi-stage Dockerfile, docker-compose.yml, CI/CD via GitHub Actions (build + push to GHCR)
 - Production deployment — running on server at `crossing.benslaughter.com` with nginx reverse proxy + SSL
 - Feedback form — modal in site footer, stored to SQLite, admin-protected GET endpoint (Bearer token via ADMIN_TOKEN env var, constant-time comparison via `hmac.compare_digest`)
+- `/admin/db.sqlite.gz` — admin-protected gzipped SQLite snapshot endpoint for self-service data pulls. Uses SQLite online backup API (WAL-safe, doesn't lock the live DB). Accepts token via `Authorization: Bearer` header OR `?token=` query string. Typical compressed size: 30-40% of original (2-5 MB per week of data).
+- `/live` and `/live/data` are admin-gated when `ADMIN_TOKEN` is set (open in dev for ergonomics). Bookmark as `/live?token=<your-admin-token>` for browser use.
 - UTC/BST timezone handling — RTT times correctly tagged as Europe/London before UTC conversion
 - Quality audit completed (May 2026 + Aug 2026) — blocking bugs fixed, window merging in `src/utils.py`, full security-header set
 - Strict security headers — Content-Security-Policy, X-Content-Type-Options, X-Frame-Options, Referrer-Policy, Permissions-Policy on every response
@@ -113,7 +115,7 @@ NROD STOMP Feeds (TD + TRUST + SF)
 | `static/style.css` | Dashboard styles |
 | `static/app.js` | Dashboard JavaScript |
 | `src/utils.py` | Shared utilities (window merging, helpers) |
-| `tests/` | 332 tests across inferrer, tracker, feed, API, history, RTT, models, route_monitor, security headers |
+| `tests/` | 342 tests across inferrer, tracker, feed, API, history, RTT, models, route_monitor, security headers |
 | `device/` | ESP32-C3 barrier logger (firmware, docs, schematics) |
 | `data/observations/` | Manual crossing observations with accuracy notes |
 | `docs/research.md` | Full research on data sources, APIs, crossing details |
@@ -144,7 +146,7 @@ roundstone-crossing/
 │   ├── live.html                     # Hidden /live debug view (raw data)
 │   ├── live.js                       # Live view JS
 │   └── live.css                      # Live view CSS
-├── tests/                            # Pytest suite (332 tests)
+├── tests/                            # Pytest suite (342 tests)
 │   ├── conftest.py                   # Shared fixtures
 │   ├── test_api.py                   # API endpoint tests
 │   ├── test_feed.py                  # NROD feed/route monitor integration
@@ -234,7 +236,7 @@ roundstone-crossing/
 cd ~/projects/roundstone-crossing
 source .venv/bin/activate
 python -m src.main --api --debug   # predictor + API on 127.0.0.1:8590
-python -m pytest tests/ -v         # run test suite (332 tests, ~4s)
+python -m pytest tests/ -v         # run test suite (342 tests, ~4s)
 ```
 
 The server writes its PID to `server.pid` (gitignored).

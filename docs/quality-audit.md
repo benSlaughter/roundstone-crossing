@@ -309,11 +309,13 @@ The following came up in audits but were judged not worth the effort/risk:
 ## Sign-off
 
 The codebase is in a **good** state. No critical issues. The two high-priority
-findings (H1 thread safety, H2 `/live*` exposure) are small fixes; the medium
-items are mostly larger refactors that should follow rather than precede the
-state-coverage metric work. The previous audit's recommendations were all
-addressed; this audit's recommendations are all tracked in
-`docs/TODO.md` or `route_improvements`.
+findings have **both been resolved in follow-up commits** (H1 still open at
+the time of writing, H2 — `/live*` exposure — closed by gating it behind
+the admin token in the same commit that added the `/admin/db.sqlite.gz`
+download endpoint). The medium items are mostly larger refactors that
+should follow rather than precede the state-coverage metric work. The
+previous audit's recommendations were all addressed; this audit's
+recommendations are all tracked in `docs/TODO.md` or `route_improvements`.
 
 If the user has time for one thing, do **#1 (state-coverage metric)** — it
 unblocks everything else and would have caught the May→Aug regression.

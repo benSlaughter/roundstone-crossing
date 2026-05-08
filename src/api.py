@@ -2,8 +2,12 @@
 API server — exposes crossing status, predictions, health, and history.
 """
 
+import gzip
 import hmac
 import os
+import shutil
+import sqlite3
+import tempfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -12,6 +16,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
+from starlette.background import BackgroundTask
 
 from .inferrer import CrossingInferrer
 from .models import CrossingState
@@ -533,18 +538,36 @@ def create_app(tracker: TrainTracker, inferrer: CrossingInferrer, history: Histo
 
     _ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN", "")
 
-    def _check_admin(authorization: str = Header(None)):
+    def _extract_token(authorization: str | None, token: str | None) -> str | None:
+        """Pull the token from either an `Authorization: Bearer ...` header or
+        a `?token=...` query string. Header wins if both are provided. Returns
+        None if neither has a usable token."""
+        if authorization:
+            prefix = "Bearer "
+            if authorization.startswith(prefix):
+                return authorization[len(prefix):]
+        return token
+
+    def _check_admin(authorization: str = Header(None), token: str = Query(None)):
+        """Strict admin gate. 503 if no token is configured at all (failure
+        to deploy correctly), 401 if a token was configured but the request
+        didn't supply a matching one. Use for endpoints that must never be
+        accessible without authentication (e.g. DB download, feedback list)."""
         if not _ADMIN_TOKEN:
             raise HTTPException(503, "Admin token not configured")
-        if not authorization:
+        provided = _extract_token(authorization, token)
+        if not provided or not hmac.compare_digest(provided, _ADMIN_TOKEN):
             raise HTTPException(401, "Unauthorized")
-        # Constant-time comparison — prevents timing oracle leaks.
-        # Strip the "Bearer " prefix first; compare what remains against the token.
-        prefix = "Bearer "
-        if not authorization.startswith(prefix):
-            raise HTTPException(401, "Unauthorized")
-        provided = authorization[len(prefix):]
-        if not hmac.compare_digest(provided, _ADMIN_TOKEN):
+
+    def _check_admin_soft(authorization: str = Header(None), token: str = Query(None)):
+        """Soft admin gate. If no token is configured (dev mode), allows
+        access — convenient for local development. If a token IS configured
+        (prod), requires it. Use for endpoints that should be open by default
+        but locked when an admin token is in play."""
+        if not _ADMIN_TOKEN:
+            return  # dev: no token configured, open access
+        provided = _extract_token(authorization, token)
+        if not provided or not hmac.compare_digest(provided, _ADMIN_TOKEN):
             raise HTTPException(401, "Unauthorized")
 
     class FeedbackBody(BaseModel):
@@ -563,15 +586,18 @@ def create_app(tracker: TrainTracker, inferrer: CrossingInferrer, history: Histo
         """Retrieve feedback submissions."""
         return {"feedback": history.get_feedback(limit=limit)}
 
-    # ── Live debug view (hidden) ─────────────────────────────────────
+    # ── Live debug view (protected when ADMIN_TOKEN is set) ──────────────
+    # Open access in dev (no token configured) for ergonomics; locked in
+    # prod where every visitor would otherwise see internal operational
+    # state. Bookmark as /live?token=<your-admin-token> for browser use.
 
     @app.get("/live")
-    async def live_view():
+    async def live_view(_=Depends(_check_admin_soft)):
         """Serve the live debug/advanced view page."""
         return FileResponse(STATIC_DIR / "live.html")
 
     @app.get("/live/data")
-    async def live_data():
+    async def live_data(_=Depends(_check_admin_soft)):
         """All raw technical data for the live debug view.
 
         Returns trains, routes, berths, crossing state, feed health — everything
@@ -669,6 +695,61 @@ def create_app(tracker: TrainTracker, inferrer: CrossingInferrer, history: Histo
             },
             "berth_zones": berth_zones,
         }
+
+    # ── Admin: full DB snapshot download (strict admin gate) ─────────────
+
+    @app.get("/admin/db.sqlite.gz")
+    async def download_db_snapshot(_=Depends(_check_admin)):
+        """Stream a consistent gzipped snapshot of the history database.
+
+        Uses SQLite's online backup API so the snapshot is consistent and safe
+        to take while the app is actively writing (WAL-aware). Returns a
+        gzipped .db file; SQLite compresses well (~30-40% of original size).
+
+        Pull from the command line with:
+            curl -fLo crossing.db.gz \\
+                "https://crossing.benslaughter.com/admin/db.sqlite.gz?token=$ADMIN_TOKEN"
+            gunzip crossing.db.gz
+
+        Or with the Authorization header:
+            curl -fLo crossing.db.gz \\
+                -H "Authorization: Bearer $ADMIN_TOKEN" \\
+                "https://crossing.benslaughter.com/admin/db.sqlite.gz"
+        """
+        # Online backup to a temp file (handles WAL transparently).
+        snap_fd, snap_path_str = tempfile.mkstemp(suffix=".db", prefix="crossing-snap-")
+        os.close(snap_fd)
+        snap_path = Path(snap_path_str)
+        try:
+            src = sqlite3.connect(str(history.db_path))
+            dst = sqlite3.connect(str(snap_path))
+            try:
+                with dst:
+                    src.backup(dst)
+            finally:
+                dst.close()
+                src.close()
+
+            # Gzip into a sibling temp file. We can't stream-gzip from
+            # FileResponse directly without losing the `Content-Length`, and
+            # we want the client to see a finite size for progress reporting.
+            gz_path = snap_path.with_suffix(".db.gz")
+            with open(snap_path, "rb") as fin, gzip.open(gz_path, "wb", compresslevel=6) as fout:
+                shutil.copyfileobj(fin, fout, length=1024 * 1024)
+        except Exception:
+            snap_path.unlink(missing_ok=True)
+            raise
+
+        # Snapshot itself can be removed now; gz_path is what we'll stream.
+        snap_path.unlink(missing_ok=True)
+
+        ts = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+        return FileResponse(
+            gz_path,
+            media_type="application/gzip",
+            filename=f"crossing-{ts}.db.gz",
+            background=BackgroundTask(lambda: gz_path.unlink(missing_ok=True)),
+        )
 
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 

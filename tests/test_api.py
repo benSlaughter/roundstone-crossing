@@ -669,3 +669,105 @@ class TestLiveEndpoint:
         resp = client.get("/live")
         assert resp.status_code == 200
         assert "text/html" in resp.headers.get("content-type", "")
+
+    def test_live_locked_when_admin_token_configured(self, tracker, inferrer, history_db):
+        """In prod (ADMIN_TOKEN set), /live and /live/data require auth."""
+        with patch.dict("os.environ", {"ADMIN_TOKEN": "prodtoken"}):
+            app = create_app(tracker, inferrer, history_db)
+        client = TestClient(app)
+        # No token → 401
+        assert client.get("/live").status_code == 401
+        assert client.get("/live/data").status_code == 401
+
+    def test_live_accepts_token_via_query_string(self, tracker, inferrer, history_db):
+        """Bookmarking /live?token=xxx should work."""
+        with patch.dict("os.environ", {"ADMIN_TOKEN": "prodtoken"}):
+            app = create_app(tracker, inferrer, history_db)
+        client = TestClient(app)
+        assert client.get("/live?token=prodtoken").status_code == 200
+        assert client.get("/live/data?token=prodtoken").status_code == 200
+
+    def test_live_accepts_token_via_bearer_header(self, tracker, inferrer, history_db):
+        """curl -H 'Authorization: Bearer xxx' should also work."""
+        with patch.dict("os.environ", {"ADMIN_TOKEN": "prodtoken"}):
+            app = create_app(tracker, inferrer, history_db)
+        client = TestClient(app)
+        h = {"Authorization": "Bearer prodtoken"}
+        assert client.get("/live", headers=h).status_code == 200
+        assert client.get("/live/data", headers=h).status_code == 200
+
+    def test_live_wrong_token_via_query_rejected(self, tracker, inferrer, history_db):
+        with patch.dict("os.environ", {"ADMIN_TOKEN": "prodtoken"}):
+            app = create_app(tracker, inferrer, history_db)
+        client = TestClient(app)
+        assert client.get("/live?token=wrong").status_code == 401
+        assert client.get("/live/data?token=wrong").status_code == 401
+
+
+class TestAdminDbDownload:
+    """Tests for the /admin/db.sqlite.gz endpoint — strict admin gate."""
+
+    def test_no_admin_token_configured_returns_503(self, tracker, inferrer, history_db):
+        with patch.dict("os.environ", {"ADMIN_TOKEN": ""}, clear=False):
+            app = create_app(tracker, inferrer, history_db)
+        client = TestClient(app)
+        assert client.get("/admin/db.sqlite.gz").status_code == 503
+
+    def test_no_token_provided_returns_401(self, tracker, inferrer, history_db):
+        with patch.dict("os.environ", {"ADMIN_TOKEN": "secret"}):
+            app = create_app(tracker, inferrer, history_db)
+        client = TestClient(app)
+        assert client.get("/admin/db.sqlite.gz").status_code == 401
+
+    def test_correct_token_via_query_returns_gzipped_db(self, tracker, inferrer, history_db):
+        # Seed some data so the download has content
+        from src.models import CrossingState, CrossingStatus
+        history_db.log_state_change(CrossingStatus(state=CrossingState.OPEN, confidence=0.9))
+
+        with patch.dict("os.environ", {"ADMIN_TOKEN": "secret"}):
+            app = create_app(tracker, inferrer, history_db)
+        client = TestClient(app)
+        resp = client.get("/admin/db.sqlite.gz?token=secret")
+        assert resp.status_code == 200
+        assert resp.headers["content-type"] == "application/gzip"
+        assert "crossing-" in resp.headers.get("content-disposition", "")
+        assert resp.headers.get("content-disposition", "").endswith('.db.gz"')
+
+        # Body should be a valid gzip stream containing a SQLite DB
+        import gzip as gz
+        import io
+        decompressed = gz.decompress(resp.content)
+        # SQLite file header: "SQLite format 3\x00"
+        assert decompressed[:16] == b"SQLite format 3\x00"
+
+    def test_correct_token_via_bearer_returns_db(self, tracker, inferrer, history_db):
+        with patch.dict("os.environ", {"ADMIN_TOKEN": "secret"}):
+            app = create_app(tracker, inferrer, history_db)
+        client = TestClient(app)
+        resp = client.get(
+            "/admin/db.sqlite.gz",
+            headers={"Authorization": "Bearer secret"},
+        )
+        assert resp.status_code == 200
+        assert resp.headers["content-type"] == "application/gzip"
+
+    def test_wrong_token_rejected(self, tracker, inferrer, history_db):
+        with patch.dict("os.environ", {"ADMIN_TOKEN": "secret"}):
+            app = create_app(tracker, inferrer, history_db)
+        client = TestClient(app)
+        assert client.get("/admin/db.sqlite.gz?token=wrong").status_code == 401
+
+    def test_download_does_not_lock_db(self, tracker, inferrer, history_db):
+        """SQLite .backup() should produce a snapshot without preventing
+        concurrent writes to the source DB. Verify: trigger a download then
+        write to the original DB; should not raise."""
+        from src.models import CrossingState, CrossingStatus
+        with patch.dict("os.environ", {"ADMIN_TOKEN": "secret"}):
+            app = create_app(tracker, inferrer, history_db)
+        client = TestClient(app)
+        resp = client.get("/admin/db.sqlite.gz?token=secret")
+        assert resp.status_code == 200
+        # Source DB still writable after download
+        history_db.log_state_change(CrossingStatus(state=CrossingState.CLOSED_INFERRED, confidence=0.9))
+        rows = history_db.get_intervals()
+        assert len(rows) >= 1
