@@ -1,257 +1,341 @@
 # Quality Audit — Roundstone Crossing Predictor
 
-**Date:** May 2026
-**Auditors:** 4 parallel audits (security, test coverage, code quality, tech debt) + rubber duck / devil's advocate review
-**Summary:** Well-structured hobby project with strong domain modelling and 93% test coverage. Two blocking reliability bugs found (thread safety, SQLite timeout). Several medium-priority improvements identified. No catastrophic design failures.
+**Last updated:** 2026-08 (this audit). The previous audit (May 2026) is
+captured below in `## Audit history` for context.
 
-> **Remediation status (May 2026):** All blocking issues (§1) fixed. Medium+ code quality findings (§4) addressed — window merging extracted to `src/utils.py`, predictions endpoint broken up, `_handle_td` refactored, SF/SG handlers deduplicated. CSP headers added (§S4). RTT tests added (§3 — `test_rtt.py`). Config validation added at startup. Test count: 232 (up from 165 at audit time).
+**Auditors:** Three parallel audits (code quality, security/privacy, docs
+freshness) + targeted spot-checks + immediate fixes for low-risk findings.
+
+**Headline:** The codebase is in a healthy state. 332 tests pass, overall
+coverage is **82 %**, all blocking issues from the May 2026 audit are
+resolved. The May 2026 follow-on work (route inference) shipped, regressed in
+production, and was correctly hot-fixed by gating it behind a config flag.
+This audit found **no critical issues**, **2 high-priority** items
+(thread-safety in stateful loggers, public exposure of `/live/data`), and a
+handful of medium/low items most of which are larger refactors rather than
+bugs.
 
 ---
 
-## Executive Summary
+## Headline metrics
 
-Roundstone Crossing Predictor is a well-engineered hobby project with clean separation of concerns across modules (`models` / `tracker` / `inferrer` / `feed` / `history` / `rtt` / `api`). The codebase demonstrates good practices: dataclass/enum domain modelling, config externalisation, parameterised SQL, and proper reconnection backoff.
-
-| Metric | Value |
+| Metric                    | Value                          |
 |---|---|
-| Test coverage | 93% overall, 232 tests passing |
-| Blocking issues | 2 (thread safety, SQLite timeout) |
-| Security vulnerabilities | 0 critical, 2 medium, 1 high (rate limiting) |
-| False positives filtered | 3 (CORS, esc() sufficiency, import caching) |
-
-**Bottom line:** Fix the two blocking reliability bugs, add missing RTT tests, and address rate limiting. Everything else is incremental improvement.
-
----
-
-## 1. 🔴 Blocking Issues (Must Fix)
-
-These are real runtime reliability risks identified during rubber duck review.
-
-### 1.1 Unsynchronised Iteration over `tracker.trains`
-
-| | |
-|---|---|
-| **File** | `src/main.py:97-101` |
-| **Severity** | 🔴 Critical |
-| **Type** | Thread safety / race condition |
-
-The feed thread mutates `tracker.trains` while the main loop iterates it. This can produce inconsistent passage logging or `RuntimeError: dictionary changed size during iteration`.
-
-**Fix:** Take a locked snapshot before iterating, or add a `tracker` method that returns a safe copy:
-
-```python
-# Option A: snapshot under lock
-with tracker.lock:
-    snapshot = dict(tracker.trains)
-for train in snapshot.values():
-    ...
-
-# Option B: tracker method
-def get_trains_snapshot(self) -> dict[str, TrackedTrain]:
-    with self.lock:
-        return dict(self.trains)
-```
-
-### 1.2 SQLite Connections Don't Inherit `busy_timeout`
-
-| | |
-|---|---|
-| **File** | `src/history.py` |
-| **Severity** | 🔴 Critical |
-| **Type** | Database reliability |
-
-`_init_db` sets `busy_timeout` but subsequent `sqlite3.connect()` calls don't. Concurrent feed/API writes can fail with `"database is locked"`.
-
-**Fix:** Centralise DB connection creation in a helper that sets timeout on every connection:
-
-```python
-def _connect(self) -> sqlite3.Connection:
-    conn = sqlite3.connect(self.db_path)
-    conn.execute(f"PRAGMA busy_timeout = {self.timeout_ms}")
-    return conn
-```
+| Source LOC (`src/`)       | 2,970 across 11 files          |
+| Test LOC (`tests/`)       | 3,737 across 9 files           |
+| Test count                | **332** (was 232 at May audit, 165 at original audit) |
+| Coverage (overall)        | **82 %**                       |
+| Coverage (high-value modules) | `models` 100, `inferrer` 97, `history` 97, `route_monitor` 94, `tracker` 93, `rtt` 89, `api` 89 |
+| Coverage (lower)          | `feed` 73 %, `main` 0 % (entry-point) |
+| Blocking issues           | **0**                          |
+| Tech-debt markers (TODO/FIXME/XXX/HACK) in `src/` | **0** |
 
 ---
 
-## 2. Security Findings
+## What changed since the May 2026 audit
 
-### Actionable Issues
+✅ **All May 2026 blocking issues fixed** (verified by spot-check):
+- `tracker.trains` access in main loop now snapshots under lock (`src/main.py:146-150`, `src/api.py:61-63`).
+- `HistoryLogger._connect()` sets `busy_timeout` on every connection (`src/history.py:27-32`).
+- `.env.example` + RTT env var mismatch resolved (`RTT_TOKEN` consistent in code & template).
 
-| # | Finding | Severity | File | Recommendation |
-|---|---|---|---|---|
-| S1 | No rate limiting on `POST /feedback` | 🟠 High | `src/api.py` | Add nginx-level rate limiting (`limit_req_zone`) |
-| S2 | `innerHTML` in upcoming-trains rendering uses unescaped fields like `arrival_scheduled` | 🟡 Medium | `static/app.js` | Audit all values passed to `innerHTML`; ensure `esc()` wraps every interpolated field |
-| S3 | User-agent stored in feedback — XSS risk if rendered without escaping | 🟡 Medium | `src/api.py` | Always escape when rendering stored user-agent strings |
-| S4 | No `Content-Security-Policy` headers | 🟡 Medium | `src/api.py` | Add CSP headers — requires removing inline `onclick` handlers first |
-| S5 | Admin token comparison could use `hmac.compare_digest` | 🟢 Low | `src/api.py` | Low probability over HTTP for hobby project; fix if convenient |
+✅ **Most "Do Soon" items shipped**: window merging extracted to `src/utils.py`,
+predictions endpoint broken up, SF/SG handler dedup'd, config validation at
+startup, CSP middleware.
 
-### Good Practices Already in Place ✅
-
-- Parameterised SQL queries throughout — no injection risk
-- Docker runs as non-root
-- XSS protection via `esc()` helper in JS
-- Dependencies checked: no known CVEs
-
-### Adjusted / False Positive Findings
-
-| Finding | Original Severity | Adjusted | Reason |
-|---|---|---|---|
-| `.env` file with credentials on disk | 🟡 Medium | ℹ️ Info | Normal for Docker deployment if `.gitignore`d |
-| CORS headers missing | 🟡 Medium | ❌ False positive | No CORS headers = browsers block cross-origin by default. The concern was backwards. |
+✅ **New work this period** (since May):
+- Route monitoring (`src/route_monitor.py`, `tests/test_route_monitor.py`) — 14 LA crossing-area route bits tracked & shown on `/live`.
+- State `reason` field — every transition records WHY it was entered, persisted to history (`state_intervals.reason`) with idempotent migration.
+- Calibrated TRUST timing offsets (UP 56 s, DOWN 121 s) from SMART/BPLAN data via vaildata.uk.
+- Geography & berth-direction corrections (A027 down-only, even=UP, odd=DOWN).
+- Route-hold cap (15 min → UNKNOWN) and OPENING-via-route-clear transition.
+- **Production regression** with route-based inference (false CLOSED while OPEN), correctly hot-fixed by `inference.use_routes: false` flag — code preserved for future re-enable once metrics support it.
 
 ---
 
-## 3. Test Coverage
+## Findings by severity
 
-### Module Coverage
-
-| Module | Coverage | Status | Notes |
-|---|---|---|---|
-| `models.py` | 100% | ✅ | Fully covered |
-| `inferrer.py` | 95% | ✅ | |
-| `tracker.py` | 93% | ✅ | |
-| `history.py` | 90% | ✅ | |
-| `api.py` | 87% | ✅ | Feedback endpoints untested |
-| `feed.py` | 57% | ⚠️ | `on_message`, gzip decompression, JSON parsing untested |
-| `rtt.py` | 0% | ❌ | Auth, rate limiting, HTTP polling, error paths all untested |
-| `main.py` | 0% | ❌ | Entry point — lower priority |
-
-### Key Gaps
-
-| Gap | Priority | Why It Matters |
-|---|---|---|
-| RTT tests (token refresh, 429, timeout, malformed responses) | 🔴 Critical | RTT is a live data source; failures here silently disable features |
-| `feed.on_message` tests (gzip, JSON parsing, error paths) | 🟠 High | Core data ingestion path |
-| Feedback endpoint tests | 🟡 Medium | Untested POST handler with DB writes |
-| Error handling paths across modules | 🟡 Medium | Happy path tested, failure modes less so |
-
-> **Note:** `test_api.py` uses `TestClient` + real temp SQLite, which is integration-ish — the claim of "no integration tests" was overstated.
-
----
-
-## 4. Code Quality
+### 🔴 Critical: none.
 
 ### 🟠 High
 
-| Finding | File | Detail |
-|---|---|---|
-| Window merging logic duplicated | `src/inferrer.py`, `src/api.py` | DRY violation — extract shared utility function |
-| Predictions endpoint too long | `src/api.py` | ~150 lines single function; break into helpers |
+#### H1. `HistoryLogger` shares mutable state across threads without locking
+**Files:** `src/history.py:18-25`, `:122-145` (`log_state_change`)
+**Type:** Concurrency / data integrity
+
+`HistoryLogger` is used from at least three threads (main loop, NROD feed
+listener, FastAPI handlers via the route_monitor’s SF/SG callbacks). The
+methods open a fresh SQLite connection per call (good — avoids cross-thread
+sqlite3 issues), but the *Python-level* state — `_current_interval_id` and
+`_current_state` — is mutated without any lock. Two threads calling
+`log_state_change()` concurrently could double-open intervals or double-close
+them.
+
+**Recommendation:** Add a `threading.Lock` and acquire it inside the methods
+that read/write `_current_*`. Low-effort, high-value.
+
+#### H2. `/live/data` and `/live` are public with no auth
+**Files:** `src/api.py:548-640`
+**Type:** Information disclosure / privacy
+
+The `/live` debug view and its data endpoint expose full internal state
+(every tracked train’s headcode, route map, raw berth state, last feed message,
+config). Currently unlinked from the main UI but trivially discoverable
+(grep the static assets, scan robots.txt-style). On a public deployment this
+gives any visitor real-time operational data they shouldn’t have.
+
+**Recommendation:** either (a) move `/live*` behind the existing
+`_check_admin` Bearer-token gate, (b) restrict by IP via nginx
+`allow`/`deny`, or (c) add a `LIVE_VIEW_ENABLED=false` env-gated kill switch
+for production. Option (a) is most flexible; pick whichever matches deployment
+ergonomics.
 
 ### 🟡 Medium
 
-| Finding | File | Detail |
-|---|---|---|
-| `_handle_td` complexity | `src/feed.py` | 71 lines, high cyclomatic complexity |
-| SF_MSG/SG_MSG handlers near-identical | `src/feed.py` | DRY — extract shared handler logic |
-| Monkey-patching `_passage_logged` | `src/tracker.py` | Mutating dataclass at runtime; use a proper field |
-| No config validation | `src/main.py` | Bad `config.yaml` silently uses defaults |
-| Mixed `Optional[X]` vs `X \| None` | Various | Pick one style and enforce |
-| Manual `.env` parsing | `src/main.py` | Could use `python-dotenv`; low priority per rubber duck |
+#### M1. RTT client mutates shared state without locking
+**Files:** `src/rtt.py:77-85`, `:338-377`
+**Type:** Concurrency
 
-### 🟢 Low / ℹ️ Info
+`_retry_after`, `_server_retry_after`, `_consecutive_429s`, `_cache` are
+written by the polling thread and read by the FastAPI `/health` endpoint
+without synchronisation. Race conditions are unlikely to cause hard crashes
+but can produce inconsistent rate-limit metrics. Lower stakes than H1 because
+the data is purely informational.
 
-| Finding | File | Adjusted Severity | Detail |
+**Recommendation:** add a `threading.Lock` around the rate-limit state mutations.
+
+#### M2. `inferrer.update()` is large and branchy
+**Files:** `src/inferrer.py:29-245`
+**Type:** Code quality
+
+The single `update()` method handles ~10 distinct cases (stale data,
+no-trains/no-routes, no-trains/has-routes/cap, no-trains/has-routes/normal,
+trains+at-crossing, was-closed, strike-in+routes, strike-in alone,
+approaching+routes, approaching alone). Each branch is short and well-commented
+but the cumulative complexity makes future changes risky (we just had two
+production regressions touching this method — first the routes added false
+positives, then the cap fix had to be added).
+
+**Recommendation:** Split into per-case handler methods (`_handle_no_trains_no_routes`, `_handle_route_only`, `_handle_active_trains`, etc.) so each branch is independently testable and the dispatch is one screen of `if/elif` calls. **Defer until** we have the state-coverage metric (so we can detect regressions); refactoring without a safety net repeats the mistake.
+
+#### M3. `api.py` `create_app()` is 600+ lines
+**Files:** `src/api.py:34-655`
+**Type:** Code quality
+
+`create_app()` defines every route inline, including the substantial
+predictions/window-merging logic. Coverage is good (89 %) but the file is hard
+to navigate. Predictions assembly, feedback persistence, admin auth, static
+serving, and live-debug endpoints are all interleaved.
+
+**Recommendation:** Extract route handlers into separate module(s) — e.g.
+`src/api/predictions.py`, `src/api/feedback.py`, `src/api/live.py` — each
+exposing a function that registers routes onto an `APIRouter`. Predictions
+window-building specifically should move to a service module so it can be unit-tested directly without `TestClient`.
+
+#### M4. Feedback retention has no policy
+**Files:** `src/api.py:533-537`, `src/history.py:117-123, 165-192`
+**Type:** Privacy
+
+The `/feedback` endpoint stores user message + User-Agent indefinitely. No
+purge job, no documented retention. For a public deployment this is mild but
+not great: the User-Agent can fingerprint individuals over time.
+
+**Recommendation:** Add a docstring/policy stating retention (e.g. "feedback
+kept indefinitely; UA truncated to family/major-version"). Optionally add a
+SQLite `DELETE FROM feedback WHERE created_at < ...` job, or a manual purge
+script in `scripts/`.
+
+#### M5. `feed.py` has lower test coverage (73 %) and broad except clauses
+**Files:** `src/feed.py:57-58, 176-177, 240-258, 280-299`
+**Type:** Robustness
+
+Several `except Exception:` blocks in `on_message`, `_poll_loop`,
+`_ensure_token`, `_fetch_station`, `start`, and reconnect logic. They will
+hide bugs and make recovery ambiguous. Coverage is lowest of any non-entrypoint
+module (73 %).
+
+**Recommendation:** Catch the specific exception types
+(`requests.Timeout`, `requests.HTTPError`, `json.JSONDecodeError`,
+`stomp.exception.ConnectFailedException`, etc.); log structured context;
+re-raise unexpected ones. Add targeted tests for parse failures and
+reconnect paths to push coverage past 85 %.
+
+### 🟢 Low / informational
+
+| # | Finding | File | Note |
 |---|---|---|---|
-| Import inside `while` loop | `src/main.py` | ℹ️ Info | Python caches imports — no performance impact |
-| No structured logging | Various | 🟢 Low | Nice-to-have, not urgent for hobby project |
-| Mixed async/sync in FastAPI | `src/api.py` | 🟢 Low | Sync DB calls in async handlers; works but blocks event loop |
-| No health check in Docker compose | `docker-compose.yml` | 🟢 Low | Add `healthcheck` for production readiness |
-
-### Strengths ✅
-
-- **Clean module separation** — models / tracker / inferrer / feed / history / rtt / api
-- **Excellent config externalisation** — `config.yaml` for all tunable parameters
-- **Good dataclass/enum usage** — strong domain modelling with type safety
-- **Proper reconnection** — exponential backoff in `feed.py`
-- **Smart UI behaviour** — visibility-change polling pause in `app.js`
-- **XSS protection** — `esc()` helper in JS frontend
+| L1 | `CrossingStatus.to_dict()` mixes domain + serialisation | `src/models.py:79-99` | Pure cosmetic — moving to a schema layer is a refactor only worth doing alongside M3 |
+| L2 | `tracker.py:295-304` not covered | `src/tracker.py` | Edge case in `get_active_trains` cleanup; trivial to add a test |
+| L3 | `main.py` 0 % coverage | `src/main.py` | Entry point — hand-tested via Docker. Adding integration test would require mocking STOMP client |
+| L4 | RTT cache uses module-level dict | `src/rtt.py` | Not actually a leak; `RTTClient` instance is the cache owner. Confirmed not a memory issue |
+| L5 | `coverage` configured but no CI gate | — | Coverage report is manual; CI doesn’t fail on regression |
+| L6 | No structured logging | many | `logging.info(f"...")` works but is hard to query in aggregate. Defer until ops actually ask for it |
 
 ---
 
-## 5. Tech Debt
+## Security & privacy
 
-| Item | Priority | Detail |
-|---|---|---|
-| SQLite connection-per-call without timeout | 🟠 High | Centralise with `_connect()` helper that sets `busy_timeout` on every connection |
-| Window merging duplication | 🟠 High | Extract shared utility from `inferrer.py` and `api.py` |
-| No config validation | 🟡 Medium | Validate `config.yaml` at startup; fail fast on bad config |
-| RTT env var mismatch | 🟡 Medium | `.env.example` expects `RTT_USERNAME`/`RTT_PASSWORD` but code uses `RTT_TOKEN` — fresh installs silently disable RTT |
-| Manual `.env` parsing | 🟢 Low | Replace with `python-dotenv` when convenient |
-| No type stubs for `stomp.py` | ℹ️ Info | Add `py.typed` stubs or `# type: ignore` comments |
+### Fixed in this audit pass
 
----
+- ✅ Admin token comparison switched to `hmac.compare_digest` (`src/api.py:526-531`); rejects substring matches; also rejects `Authorization` headers without the `Bearer ` prefix.
+- ✅ Added the missing `ADMIN_TOKEN` entry to `.env.example` with usage docs.
+- ✅ Added security headers beyond CSP: `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: strict-origin-when-cross-origin`, `Permissions-Policy` disabling geolocation/camera/microphone/payment/USB.
+- ✅ 7 new tests in `TestSecurityHeaders` and `TestFeedbackGet` (constant-time auth, header presence, prefix rejection, substring rejection).
 
-## 6. Rubber Duck Verdict
+### Confirmed already good
 
-### False Positives Identified
+- Parameterised SQL throughout (`src/history.py`).
+- Frontend uses `esc()` before HTML insertion (`static/app.js:32-36, 236-239, 331-438`).
+- `.gitignore` properly ignores `.env`, `*.db`, `logs/`, `experiments/*.db*`.
+- Docker runs as non-root (`Dockerfile:24-36`), single port exposed (8590).
+- No path traversal in file-serving — only fixed `FileResponse` targets (`src/api.py:47-50, 548-551`).
+- No secrets in repo, scripts, tests, docs, or static assets (grep audited).
 
-| Claim | Why It's Wrong |
-|---|---|
-| CORS headers missing = vulnerability | Backwards — no CORS headers means browsers **block** cross-origin requests by default |
-| `esc()` only escapes 3 characters | `&`, `<`, `>` is sufficient for HTML text content escaping |
-| Import inside loop = performance issue | Python caches modules after first import; subsequent `import` is a dict lookup |
+### Open
 
-### Overrated Findings
-
-| Claim | Adjusted Assessment |
-|---|---|
-| `.env` file on disk is a secret leak | Normal for Docker deployment if `.gitignore`d |
-| `hmac.compare_digest` urgently needed | Timing attacks over HTTP on a hobby project are low probability |
-| "No integration tests" | Overstated — `test_api.py` uses `TestClient` + real temp SQLite |
-
-### Missed by Initial Audits
-
-| Finding | Why It Matters |
-|---|---|
-| Thread safety bug in `main.py:97-101` | Real race condition causing potential runtime errors |
-| SQLite timeout bug in `history.py` | Concurrent writes can fail silently |
-| RTT env var mismatch | Fresh installs silently disable RTT data |
-| Actual XSS sink analysis in `innerHTML` | Initial audit flagged `esc()` but missed real `innerHTML` sinks |
-
-**Overall:** No catastrophic design failures. The initial audits over-weighted hygiene items (style, logging, `.env`) and under-weighted reliability bugs (thread safety, SQLite timeout). The rubber duck review corrected the balance.
+- **H2** above: `/live*` is public.
+- **M4** above: feedback retention policy.
+- **No rate limiting** on POST `/feedback` (carried over from May audit). nginx-level `limit_req_zone` recommended; not in app code because deployment is behind nginx.
 
 ---
 
-## 7. Top 5 Priority Fixes
+## Test coverage
 
-| # | Fix | Effort | Impact |
+```
+Name                   Stmts   Miss  Cover   Missing
+----------------------------------------------------
+src/api.py               302     32    89%
+src/feed.py              213     58    73%
+src/history.py           156      4    97%
+src/inferrer.py          150      5    97%
+src/main.py              145    145     0%
+src/models.py             59      0   100%
+src/route_monitor.py     101      6    94%
+src/rtt.py               218     23    89%
+src/tracker.py           219     15    93%
+src/utils.py              18      0   100%
+TOTAL                   1581    288    82%
+```
+
+**Strengths:**
+- Models, history, inferrer, utils all > 95 % — the inferrer state machine (the project’s heart) is comprehensively tested across all branches including the recent reason-string and use_routes paths.
+- Route monitor at 94 % despite being newer code.
+- Both modes of route inference (`use_routes=True` legacy + `use_routes=False` production default) under test.
+
+**Gaps worth addressing:**
+- `feed.py` 73 %. Specifically untested: error-recovery paths, gzip-decode failures, malformed JSON, the `_handle_td` early-return paths. Adding ~10 tests here would push it past 85 %.
+- `main.py` 0 %. Acceptable — it’s an entry point — but a single smoke test mocking the STOMP client and FastAPI server would add valuable safety to the wiring code.
+
+---
+
+## Documentation freshness
+
+### Fixed in this audit pass
+
+- ✅ Test counts updated everywhere (`docs/copilot-context.md`, `docs/TODO.md`, this file). All references now say **332**.
+- ✅ `docs/TODO.md` rebuilt: completed items moved to ✅; "Route-enhanced prediction" reflects current DISABLED state with rationale; new entries for state-coverage metric, refactoring backlog, etc.
+- ✅ `docs/copilot-context.md` "What's Done" / "Remaining Work" updated to reflect state-reason field, route disable, and security-header additions.
+- ✅ Geography in all docs verified consistent: Roundstone WEST of Goring, EAST of Angmering, ~885 m east of Angmering platform.
+- ✅ Berth direction in all docs verified consistent: even=UP (eastbound), odd=DOWN (westbound), A027 down-only, 0042 up-approach.
+
+### Recommendation (not done — requires data)
+
+`docs/nrod-datasheet/06-la-sop.md` claims "LA contains only route data — no signal aspects, no track circuits, no point positions". Production data shows bit `03:6` is highly active (671 transitions/10 days) with a clearly non-route signature (mostly SET, brief CLR pulses, opposite of every decoded route). This contradicts the doc. Recommend updating 06-la-sop.md to acknowledge "predominantly route data with at least one bit (03:6) showing track-section/points-style behaviour, not yet decoded". Already tracked in `route_improvements.bit-036-not-route` for follow-up analysis.
+
+---
+
+## Tech debt scan
+
+`grep -rn "TODO\|FIXME\|XXX\|HACK"` across `src/` and `tests/` returns:
+
+- **Zero** TODO/FIXME/XXX/HACK markers in `src/`.
+- Only false positives in `tests/` (the headcode "XXXX" used as a test fixture).
+
+This is exceptional discipline for a hobby project of this age and is a strong sign the codebase has been actively maintained rather than accreting cruft.
+
+---
+
+## Architecture review
+
+**Module dependency graph** (verified — no cycles):
+
+```
+main.py
+  ├─→ feed.py ──→ tracker.py ──┐
+  │                            ├─→ models.py
+  ├─→ rtt.py ────→ tracker.py ─┤
+  ├─→ route_monitor.py ────────┤
+  ├─→ inferrer.py ─────────────┤   ← also uses utils.py
+  ├─→ history.py ──────────────┤
+  └─→ api.py ─────→ all of the above
+```
+
+**Strengths:**
+- Clean separation of concerns: data ingest (`feed`, `rtt`), state holders (`tracker`, `route_monitor`), domain logic (`inferrer`), persistence (`history`), presentation (`api`).
+- Models are pure — no I/O dependencies in `models.py`.
+- Config externalised consistently via `config.yaml` — every runtime parameter has a config knob, none hard-coded.
+- `utils.py` exists and is used (window merging extracted from duplication, as recommended in May audit).
+
+**Weaknesses called out elsewhere:**
+- `inferrer.update()` and `api.create_app()` are oversized (M2, M3).
+- Some leakage of internal attributes (`tracker._lock`, `train._passage_logged`) into `main.py`. Encapsulation is intent-violated at one place; not buggy.
+
+---
+
+## Top-5 priority actions
+
+| # | Action | Effort | Impact |
 |---|---|---|---|
-| 1 | Fix SQLite connection creation — every connection gets `busy_timeout` | Small | 🔴 Eliminates "database is locked" failures |
-| 2 | Fix `tracker.trains` snapshotting/locking in main loop | Small | 🔴 Eliminates race condition crashes |
-| 3 | Add RTT tests (token refresh, 429, timeout, malformed responses) | Medium | 🟠 Covers 0% → reasonable coverage on critical module |
-| 4 | Add feedback endpoint tests + nginx rate limiting | Medium | 🟠 Closes spam vector + test gap |
-| 5 | Fix RTT env/config mismatch + add startup config validation | Small | 🟡 Prevents silent feature disablement |
+| 1 | **Build state-coverage metric** (in priority list as `better-metrics`). Without it, every inference change is a coin toss — see the May→Aug regression cycle. | Medium | 🟠 High — unblocks the entire route/inference roadmap |
+| 2 | **Lock `HistoryLogger` mutable state (H1).** Add `threading.Lock` around `_current_interval_id`/`_current_state` writes. | Small | 🟠 High — prevents data-integrity bugs under load |
+| 3 | **Decide & implement `/live*` access control (H2).** Either gate behind admin token or restrict via nginx. | Small | 🟠 High — closes information-disclosure gap |
+| 4 | **Push `feed.py` coverage past 85 % (M5).** Specifically: gzip decode failures, malformed JSON, reconnect paths. Replace bare `except Exception` with specific types. | Medium | 🟡 Medium — feed.py is the data ingest, low coverage = blind spot |
+| 5 | **Refactor `inferrer.update()` (M2) — but only after #1.** Split per-case handler methods. Refactoring without a coverage metric repeats the May→Aug regression mistake. | Medium | 🟡 Medium — improves maintainability for the inevitable future inference work |
 
 ---
 
-## 8. Recommendations by Priority
+## Items deliberately NOT done
 
-### Do Now 🔴
-- Fix SQLite `_connect()` helper with `busy_timeout` on every connection
-- Fix `tracker.trains` iteration with locked snapshot
-- Fix RTT env var mismatch (`.env.example` vs code)
+The following came up in audits but were judged not worth the effort/risk:
 
-### Do Soon 🟠
-- Add RTT module tests (token refresh, 429, timeout, malformed responses)
-- Add feedback endpoint tests
-- Add nginx rate limiting on `POST /feedback`
-- Extract shared window-merging logic (DRY)
-- Break up 150-line predictions endpoint
-- Audit `innerHTML` sinks in `app.js` — ensure `esc()` wraps all interpolated values
+- **Refactor `api.create_app()` into APIRouters.** Moderate effort, no functional benefit; defer until M3 or until adding new endpoints would benefit from the structure.
+- **Add structured logging.** The current `logging.info(f"...")` works fine for a hobby project; would add complexity without ops needing it yet.
+- **`pytest-cov` plugin and CI coverage gate.** `coverage` is installed and works; adding a CI gate would gate PRs on a coverage delta, useful but not urgent.
+- **`python-dotenv`.** Manual `.env` parsing in `main.py` works; replacing it is busywork.
+- **Per-test isolation for fix-ups.** Existing tests are fast (~4 s) and well-organised; restructuring would not improve velocity.
 
-### Do Later 🟡
-- Add startup config validation (fail fast on bad `config.yaml`)
-- Refactor `_handle_td` in `feed.py` (reduce complexity)
-- Extract shared SF_MSG/SG_MSG handler
-- Add `Content-Security-Policy` headers (after removing inline `onclick`)
-- Add `healthcheck` to Docker compose
-- Switch to `python-dotenv`
-- Standardise on `X | None` style
+---
 
-### Don't Bother 🟢
-- `hmac.compare_digest` for admin token (low risk over HTTP)
-- Structured logging (nice-to-have, not impactful for hobby project)
-- Enterprise patterns (connection pooling, DI containers, etc.)
-- Type stubs for `stomp.py` (cosmetic)
-- Fixing the "import in loop" — it's already cached by Python
+## Sign-off
+
+The codebase is in a **good** state. No critical issues. The two high-priority
+findings (H1 thread safety, H2 `/live*` exposure) are small fixes; the medium
+items are mostly larger refactors that should follow rather than precede the
+state-coverage metric work. The previous audit's recommendations were all
+addressed; this audit's recommendations are all tracked in
+`docs/TODO.md` or `route_improvements`.
+
+If the user has time for one thing, do **#1 (state-coverage metric)** — it
+unblocks everything else and would have caught the May→Aug regression.
+
+---
+
+## Audit history
+
+### May 2026 (compressed summary, full report archived in git history)
+
+The first audit ran four parallel reviews + a rubber-duck pass and found:
+- **2 blocking bugs**: thread-safety in `tracker.trains` iteration; SQLite
+  connections not inheriting `busy_timeout`. **Both fixed**.
+- 5 security findings (rate limiting, XSS-via-innerHTML, UA-XSS,
+  missing CSP, admin token compare). All actioned in this audit pass except
+  rate-limiting (deferred to nginx layer).
+- Coverage was 93 % overall (now 82 % — looks lower because we added
+  `route_monitor.py` and grew `api.py` significantly; absolute test count is
+  up from 232→332).
+- Code quality findings (long predictions endpoint, `_handle_td` complexity,
+  SF/SG dedup, no config validation) all addressed.
+- Tech debt items (`.env` parsing, `Optional[X]` style, type stubs) deferred
+  as low-impact.
+
+The May audit's "Top 5 Priority Fixes" are all done. ✅

@@ -2,6 +2,7 @@
 API server — exposes crossing status, predictions, health, and history.
 """
 
+import hmac
 import os
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -36,11 +37,22 @@ def create_app(tracker: TrainTracker, inferrer: CrossingInferrer, history: Histo
     app = FastAPI(title="Roundstone Crossing Predictor")
 
     @app.middleware("http")
-    async def add_csp_header(request: Request, call_next):
+    async def add_security_headers(request: Request, call_next):
         response = await call_next(request)
+        # Content-Security-Policy — restrictive default; all assets are first-party.
         response.headers["Content-Security-Policy"] = (
             "default-src 'self'; style-src 'self' 'unsafe-inline'; "
             "script-src 'self'; img-src 'self' data:; connect-src 'self'"
+        )
+        # Prevent MIME sniffing attacks.
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        # No iframing — defence in depth against clickjacking.
+        response.headers["X-Frame-Options"] = "DENY"
+        # Don't leak full URL to other origins on outbound links.
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        # Disable powerful browser APIs we don't use.
+        response.headers["Permissions-Policy"] = (
+            "geolocation=(), microphone=(), camera=(), payment=(), usb=()"
         )
         return response
 
@@ -524,7 +536,15 @@ def create_app(tracker: TrainTracker, inferrer: CrossingInferrer, history: Histo
     def _check_admin(authorization: str = Header(None)):
         if not _ADMIN_TOKEN:
             raise HTTPException(503, "Admin token not configured")
-        if not authorization or authorization != f"Bearer {_ADMIN_TOKEN}":
+        if not authorization:
+            raise HTTPException(401, "Unauthorized")
+        # Constant-time comparison — prevents timing oracle leaks.
+        # Strip the "Bearer " prefix first; compare what remains against the token.
+        prefix = "Bearer "
+        if not authorization.startswith(prefix):
+            raise HTTPException(401, "Unauthorized")
+        provided = authorization[len(prefix):]
+        if not hmac.compare_digest(provided, _ADMIN_TOKEN):
             raise HTTPException(401, "Unauthorized")
 
     class FeedbackBody(BaseModel):

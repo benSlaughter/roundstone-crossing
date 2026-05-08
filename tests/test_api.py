@@ -387,6 +387,50 @@ class TestFeedbackGet:
         resp = client.get("/feedback", headers={"Authorization": "Bearer anything"})
         assert resp.status_code == 503
 
+    def test_authorization_without_bearer_prefix_rejected(self, tracker, inferrer, history_db):
+        """Auth header without 'Bearer ' prefix should be rejected, not crash."""
+        with patch.dict("os.environ", {"ADMIN_TOKEN": "secret123"}):
+            app = create_app(tracker, inferrer, history_db)
+        client = TestClient(app)
+        resp = client.get("/feedback", headers={"Authorization": "secret123"})
+        assert resp.status_code == 401
+
+    def test_token_with_substring_match_rejected(self, tracker, inferrer, history_db):
+        """A prefix of the real token must not be accepted (regression for
+        early-string-compare bugs that constant-time check rules out)."""
+        with patch.dict("os.environ", {"ADMIN_TOKEN": "longtoken123"}):
+            app = create_app(tracker, inferrer, history_db)
+        client = TestClient(app)
+        resp = client.get("/feedback", headers={"Authorization": "Bearer longtoken"})
+        assert resp.status_code == 401
+
+
+class TestSecurityHeaders:
+    """All responses should carry hardening headers."""
+
+    def test_csp_header_present(self, client):
+        resp = client.get("/up")
+        assert resp.status_code == 200
+        assert "Content-Security-Policy" in resp.headers
+        # Should restrict to self by default
+        assert "default-src 'self'" in resp.headers["Content-Security-Policy"]
+
+    def test_x_content_type_options_nosniff(self, client):
+        resp = client.get("/up")
+        assert resp.headers.get("X-Content-Type-Options") == "nosniff"
+
+    def test_x_frame_options_deny(self, client):
+        resp = client.get("/up")
+        assert resp.headers.get("X-Frame-Options") == "DENY"
+
+    def test_referrer_policy_strict(self, client):
+        resp = client.get("/up")
+        assert "strict-origin" in resp.headers.get("Referrer-Policy", "")
+
+    def test_permissions_policy_present(self, client):
+        resp = client.get("/up")
+        assert "Permissions-Policy" in resp.headers
+
 
 # ── Predictions/next endpoint ────────────────────────────────────────
 

@@ -62,12 +62,12 @@ NROD STOMP Feeds (TD + TRUST + SF)
 
 ### ✅ What's Done
 - Full prediction pipeline: feed → tracker → inferrer → API → web dashboard
-- 232 automated tests, all passing (~2s)
+- 332 automated tests, all passing (~4s)
 - S-Class signalling message logging (SF/SG/SH/CT) for future barrier state correlation
 - RTT integration for station-level train enrichment (with tests)
 - Web dashboard with CSS/JS extracted to separate files (`static/style.css`, `static/app.js`)
 - Manual observation data collection (4 days: Apr 28-30, May 1) with precision tracking
-- Timing parameters calibrated from real observations
+- Timing parameters calibrated from real production data (10 days)
 - State machine hardened against bouncing, false opens, stale train artifacts
 - ESP32-C3 barrier logger: firmware, documentation, schematics, BOM (~£21)
 - GitHub repo: public at `benSlaughter/roundstone-crossing`
@@ -75,19 +75,26 @@ NROD STOMP Feeds (TD + TRUST + SF)
 - Predictions tab — upcoming crossing closure windows derived from RTT station data, with proximity-coloured cards and auto-refresh
 - Docker deployment — multi-stage Dockerfile, docker-compose.yml, CI/CD via GitHub Actions (build + push to GHCR)
 - Production deployment — running on server at `crossing.benslaughter.com` with nginx reverse proxy + SSL
-- Feedback form — modal in site footer, stored to SQLite, admin-protected GET endpoint (Bearer token via ADMIN_TOKEN env var)
+- Feedback form — modal in site footer, stored to SQLite, admin-protected GET endpoint (Bearer token via ADMIN_TOKEN env var, constant-time comparison via `hmac.compare_digest`)
 - UTC/BST timezone handling — RTT times correctly tagged as Europe/London before UTC conversion
-- Quality audit completed — blocking bugs fixed (thread safety, SQLite timeout), window merging refactored into `src/utils.py`
-- Strict CSP headers — all inline styles moved to CSS classes, Content-Security-Policy middleware on all responses
+- Quality audit completed (May 2026 + Aug 2026) — blocking bugs fixed, window merging in `src/utils.py`, full security-header set
+- Strict security headers — Content-Security-Policy, X-Content-Type-Options, X-Frame-Options, Referrer-Policy, Permissions-Policy on every response
 - `/up` health endpoint for uptime monitors (returns 200 + JSON uptime)
 - Config validation at startup — `config.yaml` validated with clear error messages on missing/invalid fields
+- LA SOP route monitoring — 14 crossing-area route bits (R27-R35, RA007-RA010) tracked via `src/route_monitor.py`, shown live on `/live`, every transition logged to `sf_events`
+- Route-hold cap — stuck routes downgrade to UNKNOWN after `max_route_hold_secs` (15 min default) instead of locking us in CLOSED indefinitely
+- OPENING via route-clear — when all routes clear with no train, briefly emit `OPENING_PREDICTED` (signaller verifies CCTV before raising)
+- State `reason` field — every state transition records WHY it was entered (e.g. `"train at crossing: 1H42 + routes (R32)"`); shown on `/live`, persisted to `state_intervals.reason`
+- Berth/direction correction — A027 is DOWN-only (clear berth); 0042 is the UP-approach berth. LA convention: even=UP (eastbound), odd=DOWN (westbound)
+- Geography correction — Roundstone is WEST of Goring, EAST of Angmering (~885m east of Angmering platform)
 
 ### 🔲 Remaining Work
-1. **SF correlation** (blocked) — Attempted to identify which SF address+bit = barrier state. Area LA data (8 addresses) does not correlate with observed closures. The barrier control may be on a different signalling area or not published via NROD. Needs further research or broader SF capture.
-2. **ESP32 device build** — Firmware and docs ready, need to order parts (~£21 BOM) and assemble
-3. **Schedule context** — No CIF schedule integration for advance prediction
-4. **Home Assistant integration** — MQTT notifications for barrier state changes
-5. **Observation upload endpoint** — API to accept CSVs from device/phone for automated comparison
+1. **Route-based inference is currently DISABLED** — `inference.use_routes: false` in `config.yaml` after a 2026-05-08 production regression where route-based inference reported CLOSED while barriers were OPEN. Routes are still monitored, logged, and shown on `/live`. Re-enable after building a proper state-coverage metric (#2 below) and per-route reliability weighting.
+2. **State-coverage metric** — Currently we have no way to fairly evaluate predictor changes. Need: "% of time predictor correctly says CLOSED during actual closures" + "% of asserted-CLOSED time that matched a real closure". Required before any further inference tuning.
+3. **ESP32 device build** — Firmware and docs ready, need to order parts (~£21 BOM) and assemble
+4. **Schedule context** — No CIF schedule integration for advance prediction
+5. **Home Assistant integration** — MQTT notifications for barrier state changes
+6. **Observation upload endpoint** — API to accept CSVs from device/phone for automated comparison
 
 ## Key Files
 
@@ -106,7 +113,7 @@ NROD STOMP Feeds (TD + TRUST + SF)
 | `static/style.css` | Dashboard styles |
 | `static/app.js` | Dashboard JavaScript |
 | `src/utils.py` | Shared utilities (window merging, helpers) |
-| `tests/` | 302 tests across inferrer, tracker, feed, API, history, RTT, models |
+| `tests/` | 332 tests across inferrer, tracker, feed, API, history, RTT, models, route_monitor, security headers |
 | `device/` | ESP32-C3 barrier logger (firmware, docs, schematics) |
 | `data/observations/` | Manual crossing observations with accuracy notes |
 | `docs/research.md` | Full research on data sources, APIs, crossing details |
@@ -137,7 +144,7 @@ roundstone-crossing/
 │   ├── live.html                     # Hidden /live debug view (raw data)
 │   ├── live.js                       # Live view JS
 │   └── live.css                      # Live view CSS
-├── tests/                            # Pytest suite (302 tests)
+├── tests/                            # Pytest suite (332 tests)
 │   ├── conftest.py                   # Shared fixtures
 │   ├── test_api.py                   # API endpoint tests
 │   ├── test_feed.py                  # NROD feed/route monitor integration
@@ -227,7 +234,7 @@ roundstone-crossing/
 cd ~/projects/roundstone-crossing
 source .venv/bin/activate
 python -m src.main --api --debug   # predictor + API on 127.0.0.1:8590
-python -m pytest tests/ -v         # run test suite (302 tests, ~4s)
+python -m pytest tests/ -v         # run test suite (332 tests, ~4s)
 ```
 
 The server writes its PID to `server.pid` (gitignored).

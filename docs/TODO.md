@@ -3,14 +3,14 @@
 ## ✅ Completed
 
 - [x] **Register for NROD access** — Connected and receiving live TD + TRUST + SF data
-- [x] **Map TD berths near Roundstone crossing** — Area LA confirmed, berths 0032-0041 mapped for both directions
+- [x] **Map TD berths near Roundstone crossing** — Area LA confirmed; berths 0032-0042 (UP/even) and 0033-0041 + A027 (DOWN/odd) mapped
 - [x] **Download SMART data** — SMART and CORPUS data used for berth-to-location mapping
-- [x] **Calibrate timing model** — Calibrated from 4 days of manual observations (Apr 28-May 1): pre_closure=120s, crossing_clearance=10s, post_clearance=5s
+- [x] **Calibrate timing model** — Calibrated from production data: pre_closure=180s (was 120s, refined from 10-day route-SET-to-at-crossing median), TRUST offsets recalibrated against SMART (UP 56s, DOWN 121s)
 - [x] **Validate predictions** — Observed multiple crossing events, identified and fixed state bouncing, stale train, and false open issues
-- [x] **Automated tests** — 165 tests covering inferrer, tracker, feed, API, and history
+- [x] **Automated tests** — 332 tests covering inferrer, tracker, feed, API, history, route monitor, security headers
 - [x] **Opening prediction** — Multi-train closure window merging with accurate opening predictions
 - [x] **Web dashboard** — Tab-based UI with CSS/JS extracted to separate files
-- [x] **Code audit remediation** — Thread safety, feed reconnect, CB_MSG handling, XSS fixes
+- [x] **Code audit remediation** — Thread safety, feed reconnect, CB_MSG handling, XSS fixes; constant-time admin auth; full security-header set
 - [x] **GitHub repo** — Public at `benSlaughter/roundstone-crossing`
 - [x] **Security audit** — Credentials, PII, .gitignore cleaned
 - [x] **RTT integration** — Platform-level train enrichment at Angmering and Goring-by-Sea
@@ -21,21 +21,28 @@
 - [x] **Production deployment** — Live at crossing.benslaughter.com (nginx + SSL + Docker on Azure)
 - [x] **Feedback form** — Modal in footer, SQLite storage, admin-protected read endpoint
 - [x] **UTC/BST timezone fix** — RTT times correctly handled as Europe/London
+- [x] **Berth direction correction** — A027 is DOWN-only (clear berth); 0042 is UP-approach. LA convention: even=UP, odd=DOWN
+- [x] **Geography correction** — Roundstone is WEST of Goring, EAST of Angmering (~885m east of Angmering platform)
+- [x] **Route-hold cap** — Stuck routes downgrade to UNKNOWN after 15 min instead of locking us in CLOSED
+- [x] **OPENING via route-clear** — When all routes clear with no train, briefly emit OPENING_PREDICTED before OPEN
+- [x] **State reason field** — Every state transition records why; visible in `/live` and persisted in `state_intervals.reason`
+- [x] **Wider TLS hardening** — CSP + X-Content-Type-Options + X-Frame-Options + Referrer-Policy + Permissions-Policy
 
 ## 🔲 Next Up
 
 - [ ] **Custom error pages** — Styled 404, 500, etc. pages matching the site's dark theme
 - [ ] **Logo/branding** — Research AI tooling for creating a unique custom logo
-- [x] **SF barrier bit identification** — ✅ RESOLVED: Barrier state is NOT in NROD data (LA TD spec has no LXG capability, exhaustive search of all 64 LA bits confirmed, complete SOP decode shows routes only). Use route-based inference instead — route SET near crossing implies barriers down (MCB-CCTV signaller procedure). Validated: 98.8% coverage across 660 crossings over 9 days.
-- [ ] **Route-enhanced prediction** — Implement route-based barrier inference in the predictor. LA route SET events (R27, R28, R29, R31, R32–R35, RA007, RA008, RA010) provide 300–400s median advance warning. 35% of crossings get earlier warning than TD berth alone.
+- [ ] **State-coverage metric** — Build a metric measuring "% of time predictor correctly says CLOSED during actual closures" so we can fairly evaluate route-based vs no-route inference. Required before re-enabling route inference.
+- [ ] **Re-enable route inference (after metric)** — Currently DISABLED in production (`config.yaml` `inference.use_routes: false`) after 2026-05-08 false-positive regression. Routes still monitored and shown on `/live`. Needs per-route reliability weighting and validation against ground-truth.
 - [ ] **Build ESP32 device** — Parts list ready (~£21 BOM), firmware written. Order parts and assemble for continuous ground-truth logging.
 - [ ] **Handle freight trains** — Freight may not appear in schedules. TD shows them as headcodes. Tracker handles unknown headcodes but confidence could be improved.
 - [ ] **Add schedule context (CIF)** — Download daily CIF schedule to predict closures before trains appear on TD. Improves the "next hour" view.
+- [ ] **Refactor large modules** — `src/api.py` (655 lines) and `src/inferrer.update()` (large branching method) flagged in May 2026 audit; partly addressed but more decomposition would help. See `docs/quality-audit.md`.
 
 ## 🟢 Future Enhancements
 
 - [ ] **Live countdown timers** — Ticking countdown on prediction cards instead of static "X min"
-- [ ] **Prediction accuracy tracking** — Log predicted vs actual closures to measure accuracy
+- [ ] **Prediction accuracy tracking** — Log predicted vs actual closures to measure accuracy (largely subsumed by the state-coverage metric above)
 - [ ] **`--no-feed` mode** — Run dev without NROD STOMP for local development
 - [ ] **Home Assistant integration** — Publish state to MQTT, create HA sensors, notifications, Jarvis voice announcements
 - [ ] **Observation upload endpoint** — API to accept CSVs from ESP32 device or phone shortcuts for automated comparison
