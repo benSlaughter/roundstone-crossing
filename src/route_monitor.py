@@ -34,9 +34,10 @@ class RouteMonitor:
     disconnect/stale conditions.
     """
 
-    def __init__(self, config: dict):
+    def __init__(self, config: dict, history=None):
         self._lock = threading.Lock()
         self._area_id = config.get("td", {}).get("area_id", "LA")
+        self._history = history
 
         # Parse crossing routes from config into normalised lookup
         # Key: (address_int, bit_index), Value: (route_name, side)
@@ -116,6 +117,7 @@ class RouteMonitor:
         except (ValueError, TypeError):
             return
 
+        transitions: list[tuple[str, str, datetime]] = []  # (route_name, action, timestamp)
         with self._lock:
             old_state = self._address_state.get(addr_int, 0)
             self._address_state[addr_int] = data_int
@@ -124,7 +126,19 @@ class RouteMonitor:
                 return
 
             now = datetime.now(timezone.utc)
-            self._update_routes_for_address(addr_int, data_int, now)
+            transitions = self._update_routes_for_address(addr_int, data_int, now)
+
+        # IMPORTANT: do not call history under self._lock — SQLite busy waits
+        # can take seconds and would block all readers (including the main
+        # loop's active_route_names() call).
+        if self._history and transitions:
+            for route_name, action, ts in transitions:
+                if action == "SET":
+                    self._history.start_route_interval(route_name, ts)
+                else:
+                    self._history.close_route_interval(
+                        route_name, ts, end_reason="observed_clear"
+                    )
 
     def handle_refresh_complete(self, area_id: str):
         """Handle SH_MSG (refresh complete). After SG refresh, any address
@@ -139,11 +153,20 @@ class RouteMonitor:
     def handle_disconnect(self):
         """Reset all route state on feed disconnect.
         Routes will be re-established via SG refresh on reconnect."""
+        cleared_names: list[str] = []
         with self._lock:
             if self._active_routes:
+                cleared_names = list(self._active_routes.keys())
                 logger.info(f"Route monitor: clearing {len(self._active_routes)} active routes (disconnect)")
             self._address_state.clear()
             self._active_routes.clear()
+
+        # Outside the lock: tell history that observation ended for these
+        # routes. Important: end_reason='disconnect' (NOT 'observed_clear')
+        # so downstream analysis knows we did not see an actual CLEAR.
+        if self._history and cleared_names:
+            now = datetime.now(timezone.utc)
+            self._history.close_all_open_route_intervals(now, end_reason="disconnect")
 
     def active_routes(self) -> list[RouteInfo]:
         """Return list of crossing routes currently SET."""
@@ -155,9 +178,16 @@ class RouteMonitor:
         with self._lock:
             return [r.name for r in self._active_routes.values()]
 
-    def _update_routes_for_address(self, addr_int: int, data_int: int, now: datetime):
+    def _update_routes_for_address(self, addr_int: int, data_int: int,
+                                   now: datetime) -> list[tuple[str, str, datetime]]:
         """Update active routes based on new byte value for an address.
-        Must be called with self._lock held."""
+        Must be called with self._lock held.
+
+        Returns a list of (route_name, action, timestamp) tuples for any
+        transitions detected. The caller is expected to forward these to
+        history outside the lock.
+        """
+        transitions: list[tuple[str, str, datetime]] = []
         for bit in range(8):
             key = (addr_int, bit)
             if key not in self._route_map:
@@ -171,6 +201,7 @@ class RouteMonitor:
                     name=route_name, side=side, set_since=now,
                 )
                 logger.info(f"Route SET: {route_name} ({side})")
+                transitions.append((route_name, "SET", now))
 
             elif not bit_set and route_name in self._active_routes:
                 info = self._active_routes.pop(route_name)
@@ -179,3 +210,6 @@ class RouteMonitor:
                     secs = (now - info.set_since).total_seconds()
                     held = f" (held {secs:.0f}s)"
                 logger.info(f"Route CLEAR: {route_name} ({side}){held}")
+                transitions.append((route_name, "CLEAR", now))
+
+        return transitions

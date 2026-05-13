@@ -48,6 +48,7 @@ class HistoryLogger:
         # log_state_change() open a fresh interval naturally — this records
         # the gap honestly rather than pretending continuity.
         self._close_orphaned_intervals_at_startup()
+        self._close_orphaned_route_intervals_at_startup()
 
     def _connect(self) -> sqlite3.Connection:
         """Create a DB connection with consistent settings."""
@@ -148,6 +149,94 @@ class HistoryLogger:
             )
         """)
 
+        # Per-tick prediction snapshot. Logged on EVERY main-loop tick (~every
+        # 2s), regardless of whether state changed. This is the ground-truth
+        # comparison surface for downstream camera analysis: at any moment in
+        # the past we want to know exactly what the system was reporting,
+        # what it predicted next, and what it knew. Per-train detail lives
+        # in `train_snapshots` (joined by timestamp); per-route SET/CLEAR
+        # history lives in `route_intervals`.
+        db.execute("""
+            CREATE TABLE IF NOT EXISTS predictions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp TEXT NOT NULL,
+                state TEXT NOT NULL,
+                confidence REAL,
+                predicted_change_at TEXT,
+                predicted_next_state TEXT,
+                active_train_count INTEGER DEFAULT 0,
+                active_route_count INTEGER DEFAULT 0,
+                feed_age_secs REAL,
+                config_hash TEXT,
+                reason TEXT
+            )
+        """)
+        db.execute("CREATE INDEX IF NOT EXISTS idx_predictions_ts ON predictions(timestamp)")
+
+        # Per-tick per-train snapshots. One row per active train per
+        # main-loop tick. Lets downstream analysis ask "where was train X
+        # at time T?" or "what trains were near the crossing at time T?"
+        # without parsing JSON. The `tick_timestamp` column matches the
+        # corresponding `predictions.timestamp` exactly so JOINs are easy.
+        db.execute("""
+            CREATE TABLE IF NOT EXISTS train_snapshots (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                tick_timestamp TEXT NOT NULL,
+                headcode TEXT NOT NULL,
+                train_id TEXT,
+                direction TEXT,
+                phase TEXT,
+                last_berth TEXT,
+                predicted_at_crossing TEXT,
+                confidence REAL,
+                first_seen TEXT
+            )
+        """)
+        db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_train_snapshots_ts "
+            "ON train_snapshots(tick_timestamp)"
+        )
+        db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_train_snapshots_hc "
+            "ON train_snapshots(headcode, tick_timestamp)"
+        )
+
+        # Resolved route SET/CLEAR intervals — derived from sf_events, but
+        # easier to query because the bytes have already been decoded into
+        # named routes. Critical distinction: `cleared_at` is only set on an
+        # actual observed CLEAR (route bit transitioning 1→0). Disconnects
+        # and process restarts close intervals via `end_reason` and
+        # `observed_until`, NEVER by inventing a fake `cleared_at`.
+        db.execute("""
+            CREATE TABLE IF NOT EXISTS route_intervals (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                route_name TEXT NOT NULL,
+                set_at TEXT NOT NULL,
+                cleared_at TEXT,
+                observed_until TEXT,
+                duration_secs REAL,
+                end_reason TEXT,
+                notes TEXT
+            )
+        """)
+        # Partial unique index enforces "one open interval per route" at the
+        # DB level, so any future bug that double-SETs a route fails fast
+        # instead of silently corrupting history.
+        db.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_route_intervals_one_open "
+            "ON route_intervals(route_name) WHERE end_reason IS NULL"
+        )
+        # Indexes targeting the dominant analytical query: "which routes
+        # were SET (and observable) at time T?"
+        db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_route_intervals_time "
+            "ON route_intervals(set_at, observed_until)"
+        )
+        db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_route_intervals_route_time "
+            "ON route_intervals(route_name, set_at, observed_until)"
+        )
+
         db.commit()
         db.close()
         logger.info(f"History database: {self.db_path}")
@@ -178,6 +267,35 @@ class HistoryLogger:
                 logger.info(
                     f"Closed {n} orphaned state interval(s) at startup "
                     "(prior process restart left them open-ended)"
+                )
+        finally:
+            db.close()
+
+    def _close_orphaned_route_intervals_at_startup(self):
+        """Close any route_intervals rows left open by a previous process.
+
+        These are routes that were SET when the prior process exited. We
+        don't know whether the route actually cleared during the gap, so we
+        mark them as `end_reason='startup_orphan'` and `observed_until=now`
+        — preserving the uncertainty rather than inventing a `cleared_at`.
+        """
+        now = datetime.now(timezone.utc).isoformat()
+        db = self._connect()
+        try:
+            cursor = db.execute(
+                "UPDATE route_intervals SET "
+                "observed_until = ?, "
+                "duration_secs = (julianday(?) - julianday(set_at)) * 86400, "
+                "end_reason = 'startup_orphan' "
+                "WHERE end_reason IS NULL",
+                (now, now),
+            )
+            n = cursor.rowcount
+            db.commit()
+            if n > 0:
+                logger.info(
+                    f"Closed {n} orphaned route interval(s) at startup "
+                    "(prior process exited while routes were SET)"
                 )
         finally:
             db.close()
@@ -278,6 +396,187 @@ class HistoryLogger:
         )
         db.commit()
         db.close()
+
+    # ── Predictions ──────────────────────────────────────────────────────
+
+    def log_prediction(self, status: CrossingStatus, feed_age_secs: float | None = None,
+                       active_routes: list | None = None, config_hash: str | None = None):
+        """Log a per-tick prediction snapshot.
+
+        Logged on every main-loop tick (~every 2s), not only on state change.
+        Per-train detail is logged separately by `log_train_snapshots()`.
+
+        Args:
+            status: CrossingStatus from the inferrer
+            feed_age_secs: Seconds since last NROD message, or None
+            active_routes: List of active route names or RouteInfo objects.
+                           Only used to record the count here; details live
+                           in the `route_intervals` table.
+            config_hash: Short hash of inference-relevant config for provenance
+        """
+        now = datetime.now(timezone.utc).isoformat()
+
+        predicted_change_at = (status.predicted_change.isoformat()
+                               if status.predicted_change else None)
+        predicted_next = (status.predicted_next_state.value
+                          if status.predicted_next_state else None)
+
+        db = self._connect()
+        try:
+            db.execute(
+                "INSERT INTO predictions "
+                "(timestamp, state, confidence, predicted_change_at, "
+                " predicted_next_state, active_train_count, active_route_count, "
+                " feed_age_secs, config_hash, reason) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    now, status.state.value, status.confidence,
+                    predicted_change_at, predicted_next,
+                    len(status.active_trains or []),
+                    len(active_routes or []),
+                    feed_age_secs, config_hash, status.reason,
+                ),
+            )
+            db.commit()
+        finally:
+            db.close()
+        return now  # Return so callers can pass it to log_train_snapshots for exact alignment
+
+    def log_train_snapshots(self, trains: list, tick_timestamp: str | None = None):
+        """Log one row per active train at the current tick.
+
+        Args:
+            trains: List of TrackedTrain objects (the same list passed to inferrer)
+            tick_timestamp: ISO timestamp to attach to every row. If None,
+                            uses the current time. For exact alignment with
+                            `predictions`, pass the value returned by
+                            `log_prediction()`.
+        """
+        if not trains:
+            return
+        ts = tick_timestamp or datetime.now(timezone.utc).isoformat()
+        rows = [
+            (
+                ts,
+                t.headcode,
+                t.train_id,
+                t.direction.value if t.direction else None,
+                t.phase.value if t.phase else None,
+                t.last_berth,
+                t.predicted_at_crossing.isoformat() if t.predicted_at_crossing else None,
+                t.confidence,
+                t.first_seen.isoformat() if t.first_seen else None,
+            )
+            for t in trains
+        ]
+        db = self._connect()
+        try:
+            db.executemany(
+                "INSERT INTO train_snapshots "
+                "(tick_timestamp, headcode, train_id, direction, phase, "
+                " last_berth, predicted_at_crossing, confidence, first_seen) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                rows,
+            )
+            db.commit()
+        finally:
+            db.close()
+
+    # ── Route intervals ──────────────────────────────────────────────────
+
+    def start_route_interval(self, route_name: str, set_at: datetime):
+        """Record that a route went from CLEAR to SET (observed transition).
+
+        If a row already exists for this route with end_reason IS NULL, the
+        UNIQUE INDEX will reject the INSERT — log the conflict and skip,
+        because emitting two SETs without a CLEAR in between is a bug
+        upstream (RouteMonitor only emits on bit transition).
+        """
+        db = self._connect()
+        try:
+            db.execute(
+                "INSERT INTO route_intervals (route_name, set_at) VALUES (?, ?)",
+                (route_name, set_at.isoformat() if isinstance(set_at, datetime) else set_at),
+            )
+            db.commit()
+        except sqlite3.IntegrityError:
+            logger.warning(
+                f"Route {route_name} already has an open interval — "
+                f"refusing to insert a second SET. This indicates the route "
+                f"monitor double-emitted a SET without an intervening CLEAR."
+            )
+        finally:
+            db.close()
+
+    def close_route_interval(self, route_name: str, end_at: datetime,
+                             end_reason: str = "observed_clear"):
+        """Close the currently-open interval for `route_name`.
+
+        Args:
+            route_name: Route to close
+            end_at: Timestamp of the close event
+            end_reason: One of:
+                - 'observed_clear': route bit transitioned 1→0. `cleared_at` is set.
+                - 'disconnect': feed dropped while route was SET. `cleared_at`
+                  stays NULL (we did not observe a clear); `observed_until` is
+                  set instead.
+                - 'startup_orphan': handled by _close_orphaned_route_intervals_at_startup.
+                - 'duplicate_set': supersedes a stale open interval (defensive).
+        """
+        end_iso = end_at.isoformat() if isinstance(end_at, datetime) else end_at
+        cleared_at_value = end_iso if end_reason == "observed_clear" else None
+
+        db = self._connect()
+        try:
+            cursor = db.execute(
+                "UPDATE route_intervals SET "
+                "cleared_at = ?, "
+                "observed_until = ?, "
+                "duration_secs = (julianday(?) - julianday(set_at)) * 86400, "
+                "end_reason = ? "
+                "WHERE id = ("
+                "  SELECT id FROM route_intervals "
+                "  WHERE route_name = ? AND end_reason IS NULL "
+                "  ORDER BY id DESC LIMIT 1"
+                ")",
+                (cleared_at_value, end_iso, end_iso, end_reason, route_name),
+            )
+            if cursor.rowcount == 0:
+                logger.debug(
+                    f"close_route_interval({route_name}, {end_reason}): "
+                    f"no open interval to close (already closed or never started)"
+                )
+            db.commit()
+        finally:
+            db.close()
+
+    def close_all_open_route_intervals(self, end_at: datetime,
+                                       end_reason: str = "disconnect") -> int:
+        """Close every currently-open route interval (used on feed disconnect).
+
+        Returns the number of intervals closed.
+        """
+        end_iso = end_at.isoformat() if isinstance(end_at, datetime) else end_at
+        cleared_at_value = end_iso if end_reason == "observed_clear" else None
+
+        db = self._connect()
+        try:
+            cursor = db.execute(
+                "UPDATE route_intervals SET "
+                "cleared_at = ?, "
+                "observed_until = ?, "
+                "duration_secs = (julianday(?) - julianday(set_at)) * 86400, "
+                "end_reason = ? "
+                "WHERE end_reason IS NULL",
+                (cleared_at_value, end_iso, end_iso, end_reason),
+            )
+            n = cursor.rowcount
+            db.commit()
+            if n > 0:
+                logger.info(f"Closed {n} open route interval(s) ({end_reason})")
+            return n
+        finally:
+            db.close()
 
     def get_intervals(self, since: str = None, limit: int = 100) -> list[dict]:
         """Query historical state intervals."""

@@ -594,3 +594,407 @@ class TestSfEvents:
         assert summary[0]["last_seen"] is not None
         assert summary[1]["address"] == "2F"
         assert summary[1]["change_count"] == 1
+
+
+# ---------------------------------------------------------------------------
+# log_prediction (per-tick snapshots for camera ground-truth comparison)
+# ---------------------------------------------------------------------------
+
+class TestLogPrediction:
+    def test_creates_predictions_table(self, history_db):
+        db = sqlite3.connect(str(history_db.db_path))
+        tables = {r[0] for r in db.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        ).fetchall()}
+        db.close()
+        assert "predictions" in tables
+
+    def test_logs_minimal_status(self, history_db):
+        status = CrossingStatus()
+        status.state = CrossingState.OPEN
+        status.confidence = 0.8
+        status.reason = "no trains"
+
+        history_db.log_prediction(status)
+
+        db = sqlite3.connect(str(history_db.db_path))
+        rows = db.execute("SELECT state, confidence, reason FROM predictions").fetchall()
+        db.close()
+        assert len(rows) == 1
+        assert rows[0] == ("open", 0.8, "no trains")
+
+    def test_logs_full_snapshot_with_counts(self, history_db, make_train):
+        train = make_train(headcode="1A23", phase=TrainPhase.AT_CROSSING,
+                           direction=Direction.UP, last_berth="0036",
+                           confidence=0.9)
+        status = CrossingStatus()
+        status.state = CrossingState.CLOSED_INFERRED
+        status.confidence = 0.95
+        status.active_trains = [train]
+        status.predicted_change = datetime(2026, 5, 13, 9, 30, 0, tzinfo=timezone.utc)
+        status.predicted_next_state = CrossingState.OPENING_PREDICTED
+        status.reason = "train at crossing"
+
+        history_db.log_prediction(
+            status, feed_age_secs=2.5,
+            active_routes=["R27", "R29"],
+            config_hash="abc123def456",
+        )
+
+        db = sqlite3.connect(str(history_db.db_path))
+        db.row_factory = sqlite3.Row
+        row = db.execute("SELECT * FROM predictions").fetchone()
+        db.close()
+
+        assert row["state"] == "closed_inferred"
+        assert row["confidence"] == 0.95
+        assert row["predicted_change_at"] == "2026-05-13T09:30:00+00:00"
+        assert row["predicted_next_state"] == "opening_predicted"
+        assert row["active_train_count"] == 1
+        assert row["active_route_count"] == 2
+        assert row["feed_age_secs"] == 2.5
+        assert row["config_hash"] == "abc123def456"
+
+    def test_route_info_objects_counted(self, history_db):
+        from src.route_monitor import RouteInfo
+        status = CrossingStatus()
+        status.state = CrossingState.OPEN
+        status.confidence = 0.8
+
+        ts = datetime(2026, 5, 13, 9, 0, 0, tzinfo=timezone.utc)
+        history_db.log_prediction(
+            status,
+            active_routes=[
+                RouteInfo(name="R27", side="east", set_since=ts),
+                RouteInfo(name="R29", side="east", set_since=ts),
+            ],
+        )
+
+        db = sqlite3.connect(str(history_db.db_path))
+        row = db.execute("SELECT active_route_count FROM predictions").fetchone()
+        db.close()
+        assert row[0] == 2
+
+    def test_returns_timestamp_for_alignment(self, history_db):
+        """log_prediction returns the timestamp it used so callers can align
+        train_snapshots to the same tick."""
+        status = CrossingStatus()
+        status.state = CrossingState.OPEN
+        ts = history_db.log_prediction(status)
+        # Returned timestamp matches the row
+        db = sqlite3.connect(str(history_db.db_path))
+        row_ts = db.execute("SELECT timestamp FROM predictions").fetchone()[0]
+        db.close()
+        assert ts == row_ts
+
+    def test_logs_every_tick_not_just_changes(self, history_db):
+        status = CrossingStatus()
+        status.state = CrossingState.OPEN
+        status.confidence = 0.8
+        # Log five times with no state change
+        for _ in range(5):
+            history_db.log_prediction(status)
+        db = sqlite3.connect(str(history_db.db_path))
+        n = db.execute("SELECT COUNT(*) FROM predictions").fetchone()[0]
+        db.close()
+        assert n == 5
+
+    def test_handles_missing_optional_fields(self, history_db):
+        status = CrossingStatus()
+        status.state = CrossingState.UNKNOWN
+        # No confidence, no predicted_change, no trains, no routes
+        history_db.log_prediction(status)
+        db = sqlite3.connect(str(history_db.db_path))
+        row = db.execute("SELECT * FROM predictions").fetchone()
+        db.close()
+        assert row is not None  # didn't crash
+
+    def test_timestamp_has_microsecond_precision(self, history_db):
+        import re
+        status = CrossingStatus()
+        status.state = CrossingState.OPEN
+        history_db.log_prediction(status)
+        db = sqlite3.connect(str(history_db.db_path))
+        ts = db.execute("SELECT timestamp FROM predictions").fetchone()[0]
+        db.close()
+        # ISO format with microseconds: "2026-05-13T09:00:00.123456+00:00"
+        assert re.match(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}", ts)
+
+
+# ---------------------------------------------------------------------------
+# Route intervals (start/close, disconnect, orphan cleanup)
+# ---------------------------------------------------------------------------
+
+class TestRouteIntervals:
+    def test_creates_route_intervals_table(self, history_db):
+        db = sqlite3.connect(str(history_db.db_path))
+        tables = {r[0] for r in db.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        ).fetchall()}
+        db.close()
+        assert "route_intervals" in tables
+
+    def test_unique_index_one_open_per_route(self, history_db):
+        db = sqlite3.connect(str(history_db.db_path))
+        indexes = {r[0] for r in db.execute(
+            "SELECT name FROM sqlite_master WHERE type='index'"
+        ).fetchall()}
+        db.close()
+        assert "idx_route_intervals_one_open" in indexes
+
+    def test_start_then_clear(self, history_db):
+        t0 = datetime(2026, 5, 13, 9, 0, 0, tzinfo=timezone.utc)
+        t1 = datetime(2026, 5, 13, 9, 2, 30, tzinfo=timezone.utc)
+        history_db.start_route_interval("R27", t0)
+        history_db.close_route_interval("R27", t1, end_reason="observed_clear")
+
+        db = sqlite3.connect(str(history_db.db_path))
+        db.row_factory = sqlite3.Row
+        row = db.execute("SELECT * FROM route_intervals").fetchone()
+        db.close()
+        assert row["route_name"] == "R27"
+        assert row["set_at"] == "2026-05-13T09:00:00+00:00"
+        assert row["cleared_at"] == "2026-05-13T09:02:30+00:00"
+        assert row["observed_until"] == "2026-05-13T09:02:30+00:00"
+        assert row["end_reason"] == "observed_clear"
+        assert abs(row["duration_secs"] - 150.0) < 0.01
+
+    def test_disconnect_does_not_set_cleared_at(self, history_db):
+        t0 = datetime(2026, 5, 13, 9, 0, 0, tzinfo=timezone.utc)
+        t1 = datetime(2026, 5, 13, 9, 5, 0, tzinfo=timezone.utc)
+        history_db.start_route_interval("R27", t0)
+        history_db.close_all_open_route_intervals(t1, end_reason="disconnect")
+
+        db = sqlite3.connect(str(history_db.db_path))
+        db.row_factory = sqlite3.Row
+        row = db.execute("SELECT * FROM route_intervals").fetchone()
+        db.close()
+        # cleared_at must be NULL — we did NOT observe a clear, just lost feed
+        assert row["cleared_at"] is None
+        assert row["observed_until"] == "2026-05-13T09:05:00+00:00"
+        assert row["end_reason"] == "disconnect"
+
+    def test_close_all_open_returns_count(self, history_db):
+        t0 = datetime(2026, 5, 13, 9, 0, 0, tzinfo=timezone.utc)
+        t1 = datetime(2026, 5, 13, 9, 5, 0, tzinfo=timezone.utc)
+        history_db.start_route_interval("R27", t0)
+        history_db.start_route_interval("R29", t0)
+        history_db.start_route_interval("RA007", t0)
+        n = history_db.close_all_open_route_intervals(t1, end_reason="disconnect")
+        assert n == 3
+
+    def test_unique_index_rejects_double_set(self, history_db, caplog):
+        t0 = datetime(2026, 5, 13, 9, 0, 0, tzinfo=timezone.utc)
+        t1 = datetime(2026, 5, 13, 9, 1, 0, tzinfo=timezone.utc)
+        history_db.start_route_interval("R27", t0)
+        # Second SET without an intervening CLEAR should be refused
+        history_db.start_route_interval("R27", t1)
+
+        db = sqlite3.connect(str(history_db.db_path))
+        rows = db.execute("SELECT * FROM route_intervals").fetchall()
+        db.close()
+        # Only one row (the original) should exist
+        assert len(rows) == 1
+
+    def test_close_with_no_open_interval_is_safe(self, history_db):
+        # Closing a route that was never opened should not crash
+        history_db.close_route_interval(
+            "R27", datetime(2026, 5, 13, 9, 0, 0, tzinfo=timezone.utc)
+        )
+        db = sqlite3.connect(str(history_db.db_path))
+        rows = db.execute("SELECT * FROM route_intervals").fetchall()
+        db.close()
+        assert len(rows) == 0
+
+    def test_close_only_affects_most_recent_open(self, history_db):
+        # Set, clear, set again — close should only affect the second SET
+        t0 = datetime(2026, 5, 13, 9, 0, 0, tzinfo=timezone.utc)
+        t1 = datetime(2026, 5, 13, 9, 2, 0, tzinfo=timezone.utc)
+        t2 = datetime(2026, 5, 13, 9, 5, 0, tzinfo=timezone.utc)
+        t3 = datetime(2026, 5, 13, 9, 7, 0, tzinfo=timezone.utc)
+        history_db.start_route_interval("R27", t0)
+        history_db.close_route_interval("R27", t1, end_reason="observed_clear")
+        history_db.start_route_interval("R27", t2)
+        history_db.close_route_interval("R27", t3, end_reason="observed_clear")
+
+        db = sqlite3.connect(str(history_db.db_path))
+        rows = db.execute(
+            "SELECT set_at, cleared_at FROM route_intervals ORDER BY id"
+        ).fetchall()
+        db.close()
+        assert len(rows) == 2
+        assert rows[0] == ("2026-05-13T09:00:00+00:00", "2026-05-13T09:02:00+00:00")
+        assert rows[1] == ("2026-05-13T09:05:00+00:00", "2026-05-13T09:07:00+00:00")
+
+    def test_active_at_time_query(self, history_db):
+        """The dominant analytical query: which routes were active at time T?"""
+        # Set up: R27 active 09:00-09:05, R29 active 09:02-09:08
+        t = lambda h, m: datetime(2026, 5, 13, h, m, 0, tzinfo=timezone.utc)
+        history_db.start_route_interval("R27", t(9, 0))
+        history_db.start_route_interval("R29", t(9, 2))
+        history_db.close_route_interval("R27", t(9, 5), end_reason="observed_clear")
+        history_db.close_route_interval("R29", t(9, 8), end_reason="observed_clear")
+
+        # At 09:03, both should be active
+        query_t = "2026-05-13T09:03:00+00:00"
+        db = sqlite3.connect(str(history_db.db_path))
+        rows = db.execute("""
+            SELECT route_name FROM route_intervals
+            WHERE set_at <= ?
+              AND (
+                end_reason IS NULL
+                OR (end_reason = 'observed_clear' AND cleared_at > ?)
+                OR (end_reason IN ('disconnect', 'startup_orphan') AND observed_until > ?)
+              )
+        """, (query_t, query_t, query_t)).fetchall()
+        db.close()
+        names = {r[0] for r in rows}
+        assert names == {"R27", "R29"}
+
+
+class TestRouteIntervalOrphanCleanup:
+    def test_orphan_closed_at_startup(self, tmp_path):
+        from src.history import HistoryLogger
+        # Create logger, leave a route open
+        h1 = HistoryLogger(db_path=tmp_path / "test.db")
+        h1.start_route_interval("R27", datetime(2026, 5, 13, 9, 0, 0, tzinfo=timezone.utc))
+
+        # Recreate logger — should close orphan
+        h2 = HistoryLogger(db_path=tmp_path / "test.db")
+
+        db = sqlite3.connect(str(tmp_path / "test.db"))
+        db.row_factory = sqlite3.Row
+        row = db.execute("SELECT * FROM route_intervals").fetchone()
+        db.close()
+        # Orphan must be marked, not have an invented cleared_at
+        assert row["end_reason"] == "startup_orphan"
+        assert row["cleared_at"] is None
+        assert row["observed_until"] is not None
+
+    def test_orphan_cleanup_idempotent(self, tmp_path):
+        from src.history import HistoryLogger
+        h1 = HistoryLogger(db_path=tmp_path / "test.db")
+        h1.start_route_interval("R27", datetime(2026, 5, 13, 9, 0, 0, tzinfo=timezone.utc))
+        # Restart twice — second restart should not double-close
+        HistoryLogger(db_path=tmp_path / "test.db")
+        HistoryLogger(db_path=tmp_path / "test.db")
+        db = sqlite3.connect(str(tmp_path / "test.db"))
+        rows = db.execute("SELECT * FROM route_intervals").fetchall()
+        db.close()
+        assert len(rows) == 1  # still just one row
+
+
+# ---------------------------------------------------------------------------
+# log_train_snapshots — per-tick per-train rows for camera correlation
+# ---------------------------------------------------------------------------
+
+class TestLogTrainSnapshots:
+    def test_creates_train_snapshots_table(self, history_db):
+        db = sqlite3.connect(str(history_db.db_path))
+        tables = {r[0] for r in db.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        ).fetchall()}
+        db.close()
+        assert "train_snapshots" in tables
+
+    def test_indexes_exist(self, history_db):
+        db = sqlite3.connect(str(history_db.db_path))
+        indexes = {r[0] for r in db.execute(
+            "SELECT name FROM sqlite_master WHERE type='index'"
+        ).fetchall()}
+        db.close()
+        assert "idx_train_snapshots_ts" in indexes
+        assert "idx_train_snapshots_hc" in indexes
+
+    def test_one_row_per_train(self, history_db, make_train):
+        trains = [
+            make_train(headcode="1A23", phase=TrainPhase.APPROACHING),
+            make_train(headcode="2B45", phase=TrainPhase.AT_CROSSING),
+            make_train(headcode="3C67", phase=TrainPhase.CLEARED),
+        ]
+        history_db.log_train_snapshots(trains, tick_timestamp="2026-05-13T09:00:00+00:00")
+
+        db = sqlite3.connect(str(history_db.db_path))
+        rows = db.execute(
+            "SELECT headcode, phase FROM train_snapshots ORDER BY headcode"
+        ).fetchall()
+        db.close()
+        assert rows == [("1A23", "approaching"), ("2B45", "at_crossing"), ("3C67", "cleared")]
+
+    def test_captures_full_train_state(self, history_db, make_train):
+        eta = datetime(2026, 5, 13, 9, 5, 0, tzinfo=timezone.utc)
+        train = make_train(
+            headcode="1A23", direction=Direction.UP,
+            phase=TrainPhase.STRIKE_IN, last_berth="0040",
+            confidence=0.85,
+        )
+        train.train_id = "202605131A23"
+        train.predicted_at_crossing = eta
+
+        history_db.log_train_snapshots([train], tick_timestamp="2026-05-13T09:00:00+00:00")
+
+        db = sqlite3.connect(str(history_db.db_path))
+        db.row_factory = sqlite3.Row
+        row = db.execute("SELECT * FROM train_snapshots").fetchone()
+        db.close()
+        assert row["tick_timestamp"] == "2026-05-13T09:00:00+00:00"
+        assert row["headcode"] == "1A23"
+        assert row["train_id"] == "202605131A23"
+        assert row["direction"] == "up"
+        assert row["phase"] == "strike_in"
+        assert row["last_berth"] == "0040"
+        assert row["predicted_at_crossing"] == "2026-05-13T09:05:00+00:00"
+        assert row["confidence"] == 0.85
+        assert row["first_seen"] is not None
+
+    def test_empty_train_list_writes_nothing(self, history_db):
+        history_db.log_train_snapshots([], tick_timestamp="2026-05-13T09:00:00+00:00")
+        db = sqlite3.connect(str(history_db.db_path))
+        n = db.execute("SELECT COUNT(*) FROM train_snapshots").fetchone()[0]
+        db.close()
+        assert n == 0
+
+    def test_default_timestamp_used_when_omitted(self, history_db, make_train):
+        train = make_train(headcode="1A23")
+        history_db.log_train_snapshots([train])
+        db = sqlite3.connect(str(history_db.db_path))
+        row = db.execute("SELECT tick_timestamp FROM train_snapshots").fetchone()
+        db.close()
+        assert row[0] is not None  # something got stamped
+
+    def test_alignment_with_predictions(self, history_db, make_train):
+        """The pattern: log_prediction returns timestamp, pass to log_train_snapshots
+        for exact JOIN alignment."""
+        status = CrossingStatus()
+        status.state = CrossingState.CLOSED_INFERRED
+        status.active_trains = [make_train(headcode="1A23")]
+
+        ts = history_db.log_prediction(status)
+        history_db.log_train_snapshots(status.active_trains, tick_timestamp=ts)
+
+        db = sqlite3.connect(str(history_db.db_path))
+        # Verify the JOIN works
+        row = db.execute(
+            "SELECT p.state, ts.headcode FROM predictions p "
+            "JOIN train_snapshots ts ON p.timestamp = ts.tick_timestamp"
+        ).fetchone()
+        db.close()
+        assert row == ("closed_inferred", "1A23")
+
+    def test_query_train_history(self, history_db, make_train):
+        """Useful query: show all snapshots for a single train over time."""
+        train = make_train(headcode="1A23", phase=TrainPhase.APPROACHING)
+        history_db.log_train_snapshots([train], "2026-05-13T09:00:00+00:00")
+        train.phase = TrainPhase.STRIKE_IN
+        history_db.log_train_snapshots([train], "2026-05-13T09:01:00+00:00")
+        train.phase = TrainPhase.AT_CROSSING
+        history_db.log_train_snapshots([train], "2026-05-13T09:02:00+00:00")
+
+        db = sqlite3.connect(str(history_db.db_path))
+        rows = db.execute(
+            "SELECT phase FROM train_snapshots WHERE headcode = ? "
+            "ORDER BY tick_timestamp",
+            ("1A23",),
+        ).fetchall()
+        db.close()
+        assert [r[0] for r in rows] == ["approaching", "strike_in", "at_crossing"]

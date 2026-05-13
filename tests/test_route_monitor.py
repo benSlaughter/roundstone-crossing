@@ -220,3 +220,82 @@ class TestGoldenBytes:
         monitor.handle_sf_update("LA", "03", "10")
         routes = set(monitor.active_route_names())
         assert routes == {"RA010"}
+
+
+# ---------------------------------------------------------------------------
+# Integration with HistoryLogger — route intervals are recorded
+# ---------------------------------------------------------------------------
+
+class TestHistoryIntegration:
+    def test_set_writes_route_interval(self, route_config, history_db):
+        rm = RouteMonitor(route_config, history=history_db)
+        # Set R35 (address 04 bit 6 → 0x40)
+        rm.handle_sf_update("LA", "04", "40")
+
+        import sqlite3
+        db = sqlite3.connect(str(history_db.db_path))
+        db.row_factory = sqlite3.Row
+        rows = db.execute("SELECT * FROM route_intervals WHERE route_name='R35'").fetchall()
+        db.close()
+        assert len(rows) == 1
+        assert rows[0]["end_reason"] is None  # still open
+        assert rows[0]["cleared_at"] is None
+
+    def test_clear_writes_observed_clear(self, route_config, history_db):
+        rm = RouteMonitor(route_config, history=history_db)
+        rm.handle_sf_update("LA", "04", "40")  # SET R35
+        rm.handle_sf_update("LA", "04", "00")  # CLEAR R35
+
+        import sqlite3
+        db = sqlite3.connect(str(history_db.db_path))
+        db.row_factory = sqlite3.Row
+        row = db.execute("SELECT * FROM route_intervals WHERE route_name='R35'").fetchone()
+        db.close()
+        assert row["end_reason"] == "observed_clear"
+        assert row["cleared_at"] is not None
+
+    def test_disconnect_marks_intervals_uncertain(self, route_config, history_db):
+        rm = RouteMonitor(route_config, history=history_db)
+        # Set R35 (bit 6) + R34 (bit 4) → 0x50
+        rm.handle_sf_update("LA", "04", "50")
+        rm.handle_disconnect()
+
+        import sqlite3
+        db = sqlite3.connect(str(history_db.db_path))
+        db.row_factory = sqlite3.Row
+        rows = db.execute(
+            "SELECT * FROM route_intervals WHERE route_name IN ('R35', 'R34')"
+        ).fetchall()
+        db.close()
+        # Both intervals must be closed with end_reason='disconnect',
+        # but cleared_at must remain NULL — we never observed an actual clear
+        assert len(rows) == 2
+        for row in rows:
+            assert row["end_reason"] == "disconnect"
+            assert row["cleared_at"] is None
+            assert row["observed_until"] is not None
+
+    def test_no_history_is_safe(self, route_config):
+        """RouteMonitor must work when history=None (backwards compat)."""
+        rm = RouteMonitor(route_config)  # no history
+        rm.handle_sf_update("LA", "04", "40")
+        rm.handle_sf_update("LA", "04", "00")
+        rm.handle_disconnect()
+        # No exception = pass
+
+    def test_history_failure_does_not_corrupt_state(self, route_config, history_db, monkeypatch):
+        """If history.start_route_interval crashes, route monitor in-memory
+        state must still reflect the route as SET (because we updated state
+        BEFORE calling history, outside the lock)."""
+        def bad_start(*a, **kw):
+            raise RuntimeError("simulated DB failure")
+        monkeypatch.setattr(history_db, "start_route_interval", bad_start)
+
+        rm = RouteMonitor(route_config, history=history_db)
+        # The exception will propagate, but in-memory state should be SET first
+        try:
+            rm.handle_sf_update("LA", "04", "40")
+        except RuntimeError:
+            pass
+        # Even after the failed history call, the route should be marked active
+        assert "R35" in rm.active_route_names()

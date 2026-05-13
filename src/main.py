@@ -70,6 +70,9 @@ def validate_config(config: dict) -> None:
 
 def run_predictor(config: dict, with_api: bool = False):
     """Main loop: connect to feeds, track trains, infer state, log history."""
+    import hashlib
+    import json as _json
+
     from .tracker import TrainTracker
     from .inferrer import CrossingInferrer
     from .history import HistoryLogger
@@ -81,8 +84,19 @@ def run_predictor(config: dict, with_api: bool = False):
     tracker = TrainTracker(config)
     inferrer = CrossingInferrer(config)
     history = HistoryLogger()
-    route_monitor = RouteMonitor(config)
+    route_monitor = RouteMonitor(config, history=history)
     tracker.history = history
+
+    # Provenance: a short hash of the config sections that drive inference.
+    # If any of these change (timing, inference flags, berth zones, routes),
+    # downstream prediction analysis can detect the change and avoid mixing
+    # apples and oranges.
+    inference_keys = ("timing", "inference", "td", "routes")
+    prov = {k: config.get(k) for k in inference_keys}
+    config_hash = hashlib.sha256(
+        _json.dumps(prov, sort_keys=True, default=str).encode("utf-8")
+    ).hexdigest()[:12]
+    logger.info(f"Config hash: {config_hash}")
 
     last_feed_time = None
 
@@ -126,7 +140,25 @@ def run_predictor(config: dict, with_api: bool = False):
             # Get active trains and route state, update crossing state
             active = tracker.get_active_trains()
             routes = route_monitor.active_route_names()
+            active_route_infos = route_monitor.active_routes()
             status = inferrer.update(active, last_feed_time, routes)
+
+            # Per-tick prediction snapshot (always logged, even if state unchanged)
+            now = datetime.now(timezone.utc)
+            feed_age = ((now - last_feed_time).total_seconds()
+                        if last_feed_time else None)
+            try:
+                tick_ts = history.log_prediction(
+                    status,
+                    feed_age_secs=feed_age,
+                    active_routes=active_route_infos,
+                    config_hash=config_hash,
+                )
+                # Per-train snapshots aligned exactly to the prediction timestamp
+                history.log_train_snapshots(active, tick_timestamp=tick_ts)
+            except Exception:
+                # Logging must never bring down the predictor
+                logger.exception("Failed to log prediction snapshot")
 
             # Log state changes
             if status.state != prev_state:
