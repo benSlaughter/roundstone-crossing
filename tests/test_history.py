@@ -9,10 +9,6 @@ from freezegun import freeze_time
 from src.models import CrossingState, CrossingStatus, TrackedTrain, Direction, TrainPhase
 
 
-# ---------------------------------------------------------------------------
-# 1. DB initialisation
-# ---------------------------------------------------------------------------
-
 class TestDBInit:
     def test_tables_exist(self, history_db):
         db = sqlite3.connect(str(history_db.db_path))
@@ -40,10 +36,6 @@ class TestDBInit:
         }
         assert expected.issubset(indexes)
 
-
-# ---------------------------------------------------------------------------
-# 2. log_state_change
-# ---------------------------------------------------------------------------
 
 class TestLogStateChange:
     @freeze_time("2025-06-15 10:00:00", tz_offset=0)
@@ -137,10 +129,6 @@ class TestLogStateChange:
         assert len(rows) == 1
         assert rows[0]["reason"] is None
 
-
-# ---------------------------------------------------------------------------
-# 2b. Restart-survival: orphaned-interval cleanup at startup
-# ---------------------------------------------------------------------------
 
 class TestStartupOrphanCleanup:
     """When the previous logger lifecycle left state_intervals rows with
@@ -237,10 +225,6 @@ class TestStartupOrphanCleanup:
         assert rows[1]["ended_at"] is not None  # closed at startup
 
 
-# ---------------------------------------------------------------------------
-# 2c. Thread-safety: concurrent log_state_change calls
-# ---------------------------------------------------------------------------
-
 class TestThreadSafety:
     """HistoryLogger is called from multiple threads (main loop + feed
     listener + API handlers via route_monitor). The shared Python state
@@ -304,10 +288,6 @@ class TestThreadSafety:
             assert r["duration_secs"] >= 0
 
 
-# ---------------------------------------------------------------------------
-# 3. log_train_passage
-# ---------------------------------------------------------------------------
-
 class TestLogTrainPassage:
     @freeze_time("2025-06-15 10:30:00", tz_offset=0)
     def test_inserts_correct_fields(self, history_db):
@@ -330,10 +310,6 @@ class TestLogTrainPassage:
         assert row["confidence"] == 0.85
         assert row["observed_at_crossing"] is not None  # predicted time stored here
 
-
-# ---------------------------------------------------------------------------
-# 4. log_train_event
-# ---------------------------------------------------------------------------
 
 class TestLogTrainEvent:
     @freeze_time("2025-06-15 11:00:00", tz_offset=0)
@@ -358,10 +334,6 @@ class TestLogTrainEvent:
         assert row["direction"] == "down"
 
 
-# ---------------------------------------------------------------------------
-# 5. log_raw_event
-# ---------------------------------------------------------------------------
-
 class TestLogRawEvent:
     @freeze_time("2025-06-15 12:00:00", tz_offset=0)
     def test_inserts_raw_event(self, history_db):
@@ -378,10 +350,6 @@ class TestLogRawEvent:
         assert rows[0]["data"] == '{"msg": "hello"}'
         assert rows[0]["timestamp"] is not None
 
-
-# ---------------------------------------------------------------------------
-# 6. get_intervals
-# ---------------------------------------------------------------------------
 
 class TestGetIntervals:
     def _seed_intervals(self, history_db):
@@ -423,10 +391,6 @@ class TestGetIntervals:
         assert rows[0]["state"] == "open"
 
 
-# ---------------------------------------------------------------------------
-# 7. get_passages
-# ---------------------------------------------------------------------------
-
 class TestGetPassages:
     def _seed_passages(self, history_db):
         for i, hc in enumerate(["1A01", "2B02", "3C03"]):
@@ -447,10 +411,6 @@ class TestGetPassages:
         rows = history_db.get_passages(limit=1)
         assert len(rows) == 1
 
-
-# ---------------------------------------------------------------------------
-# 8. get_train_events
-# ---------------------------------------------------------------------------
 
 class TestGetTrainEvents:
     def _seed_events(self, history_db):
@@ -473,10 +433,6 @@ class TestGetTrainEvents:
         assert len(rows) == 1
         assert rows[0]["headcode"] == "2B45"
 
-
-# ---------------------------------------------------------------------------
-# 9. get_stats
-# ---------------------------------------------------------------------------
 
 class TestGetStats:
     def test_returns_correct_counts(self, history_db):
@@ -517,10 +473,6 @@ class TestGetStats:
         stats = history_db.get_stats()
         assert stats["avg_closure_duration_secs"] is None
 
-
-# ---------------------------------------------------------------------------
-# 10. SF events (S-Class signalling)
-# ---------------------------------------------------------------------------
 
 class TestSfEvents:
     @freeze_time("2025-06-15 10:00:00", tz_offset=0)
@@ -595,10 +547,6 @@ class TestSfEvents:
         assert summary[1]["address"] == "2F"
         assert summary[1]["change_count"] == 1
 
-
-# ---------------------------------------------------------------------------
-# log_prediction (per-tick snapshots for camera ground-truth comparison)
-# ---------------------------------------------------------------------------
 
 class TestLogPrediction:
     def test_creates_predictions_table(self, history_db):
@@ -720,10 +668,6 @@ class TestLogPrediction:
         # ISO format with microseconds: "2026-05-13T09:00:00.123456+00:00"
         assert re.match(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}", ts)
 
-
-# ---------------------------------------------------------------------------
-# Route intervals (start/close, disconnect, orphan cleanup)
-# ---------------------------------------------------------------------------
 
 class TestRouteIntervals:
     def test_creates_route_intervals_table(self, history_db):
@@ -883,10 +827,6 @@ class TestRouteIntervalOrphanCleanup:
         db.close()
         assert len(rows) == 1  # still just one row
 
-
-# ---------------------------------------------------------------------------
-# log_train_snapshots — per-tick per-train rows for camera correlation
-# ---------------------------------------------------------------------------
 
 class TestLogTrainSnapshots:
     def test_creates_train_snapshots_table(self, history_db):
