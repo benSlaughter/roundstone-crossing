@@ -537,6 +537,11 @@ def create_app(tracker: TrainTracker, inferrer: CrossingInferrer, history: Histo
         return {"events": history.get_sf_events(since=since, address=address, limit=limit)}
 
     _ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN", "")
+    # Explicit opt-in for running soft-admin endpoints (/live, /live/data)
+    # without an admin token. Required because the previous default of
+    # "open access when ADMIN_TOKEN unset" was unsafe for any deployment
+    # where the env var was forgotten — the default is now fail-closed.
+    _DEV_OPEN_SOFT_ADMIN = os.environ.get("ADMIN_NO_AUTH_DEV_ONLY") == "1"
 
     def _extract_token(authorization: str | None, token: str | None) -> str | None:
         """Pull the token from either an `Authorization: Bearer ...` header or
@@ -560,12 +565,25 @@ def create_app(tracker: TrainTracker, inferrer: CrossingInferrer, history: Histo
             raise HTTPException(401, "Unauthorized")
 
     def _check_admin_soft(authorization: str = Header(None), token: str = Query(None)):
-        """Soft admin gate. If no token is configured (dev mode), allows
-        access — convenient for local development. If a token IS configured
-        (prod), requires it. Use for endpoints that should be open by default
-        but locked when an admin token is in play."""
+        """Admin gate that supports an explicit dev-only opt-out.
+
+        Behaviour:
+          - ADMIN_TOKEN set → require it (same as _check_admin).
+          - ADMIN_TOKEN unset + ADMIN_NO_AUTH_DEV_ONLY=1 → allow open access.
+          - ADMIN_TOKEN unset + no override → 503.
+
+        Use for endpoints that should be open during local dev but must
+        never be reachable in prod without a token. Defaults to fail-closed
+        so a forgotten ADMIN_TOKEN env var in prod cannot leak data.
+        """
         if not _ADMIN_TOKEN:
-            return  # dev: no token configured, open access
+            if _DEV_OPEN_SOFT_ADMIN:
+                return
+            raise HTTPException(
+                503,
+                "Admin token not configured. Set ADMIN_TOKEN, or set "
+                "ADMIN_NO_AUTH_DEV_ONLY=1 to acknowledge open dev access.",
+            )
         provided = _extract_token(authorization, token)
         if not provided or not hmac.compare_digest(provided, _ADMIN_TOKEN):
             raise HTTPException(401, "Unauthorized")
@@ -586,10 +604,11 @@ def create_app(tracker: TrainTracker, inferrer: CrossingInferrer, history: Histo
         """Retrieve feedback submissions."""
         return {"feedback": history.get_feedback(limit=limit)}
 
-    # ── Live debug view (protected when ADMIN_TOKEN is set) ──────────────
-    # Open access in dev (no token configured) for ergonomics; locked in
-    # prod where every visitor would otherwise see internal operational
-    # state. Bookmark as /live?token=<your-admin-token> for browser use.
+    # ── Live debug view (admin-soft) ─────────────────────────────────────
+    # Requires ADMIN_TOKEN in prod. For local dev without a token, set
+    # ADMIN_NO_AUTH_DEV_ONLY=1 in the environment as an explicit
+    # acknowledgement. Bookmark as /live?token=<your-admin-token> for
+    # browser use.
 
     @app.get("/live")
     async def live_view(_=Depends(_check_admin_soft)):

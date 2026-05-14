@@ -619,6 +619,15 @@ def test_health_with_rtt_not_rate_limited(tracker, inferrer, history_db):
 
 class TestLiveEndpoint:
 
+    @pytest.fixture(autouse=True)
+    def _dev_open_admin(self, monkeypatch):
+        # /live and /live/data require an admin token by default. These
+        # tests verify the endpoint behaviour, not the auth wiring (covered
+        # in TestSoftAdminGate below), so opt into the dev-only no-auth
+        # mode for the whole class.
+        monkeypatch.setenv("ADMIN_NO_AUTH_DEV_ONLY", "1")
+        monkeypatch.delenv("ADMIN_TOKEN", raising=False)
+
     def test_live_data_returns_all_sections(self, tracker, inferrer, history_db):
         app = create_app(tracker, inferrer, history_db)
         client = TestClient(app)
@@ -702,6 +711,57 @@ class TestLiveEndpoint:
         client = TestClient(app)
         assert client.get("/live?token=wrong").status_code == 401
         assert client.get("/live/data?token=wrong").status_code == 401
+
+
+class TestSoftAdminFailClosed:
+    """Default fail-closed: /live must NOT be reachable without either an
+    ADMIN_TOKEN or the explicit ADMIN_NO_AUTH_DEV_ONLY=1 dev override.
+    Regression guard against the previous open-by-default behaviour.
+    """
+
+    def test_503_when_neither_token_nor_dev_override_set(
+        self, tracker, inferrer, history_db, monkeypatch,
+    ):
+        monkeypatch.delenv("ADMIN_TOKEN", raising=False)
+        monkeypatch.delenv("ADMIN_NO_AUTH_DEV_ONLY", raising=False)
+        app = create_app(tracker, inferrer, history_db)
+        client = TestClient(app)
+        assert client.get("/live").status_code == 503
+        assert client.get("/live/data").status_code == 503
+
+    def test_dev_override_must_equal_one_exactly(
+        self, tracker, inferrer, history_db, monkeypatch,
+    ):
+        monkeypatch.delenv("ADMIN_TOKEN", raising=False)
+        for sloppy_value in ("true", "yes", "TRUE", "0", ""):
+            monkeypatch.setenv("ADMIN_NO_AUTH_DEV_ONLY", sloppy_value)
+            app = create_app(tracker, inferrer, history_db)
+            client = TestClient(app)
+            assert client.get("/live").status_code == 503, (
+                f"ADMIN_NO_AUTH_DEV_ONLY={sloppy_value!r} should not unlock /live")
+
+    def test_dev_override_one_unlocks(
+        self, tracker, inferrer, history_db, monkeypatch,
+    ):
+        monkeypatch.delenv("ADMIN_TOKEN", raising=False)
+        monkeypatch.setenv("ADMIN_NO_AUTH_DEV_ONLY", "1")
+        app = create_app(tracker, inferrer, history_db)
+        client = TestClient(app)
+        assert client.get("/live").status_code == 200
+        assert client.get("/live/data").status_code == 200
+
+    def test_admin_token_takes_precedence_over_dev_override(
+        self, tracker, inferrer, history_db, monkeypatch,
+    ):
+        """Even with ADMIN_NO_AUTH_DEV_ONLY=1 set, an explicit ADMIN_TOKEN
+        still requires authentication — prevents accidentally leaving the
+        override on in a configured environment."""
+        monkeypatch.setenv("ADMIN_TOKEN", "realtoken")
+        monkeypatch.setenv("ADMIN_NO_AUTH_DEV_ONLY", "1")
+        app = create_app(tracker, inferrer, history_db)
+        client = TestClient(app)
+        assert client.get("/live").status_code == 401
+        assert client.get("/live", headers={"Authorization": "Bearer realtoken"}).status_code == 200
 
 
 class TestAdminDbDownload:
