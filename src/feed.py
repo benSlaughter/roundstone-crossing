@@ -233,12 +233,15 @@ class NRODFeed:
             logger.error("NROD_USERNAME and NROD_PASSWORD must be set")
             return False
 
-        # Disconnect existing connection cleanly before reconnecting
+        # Disconnect existing connection cleanly before reconnecting.
+        # Disconnect failures are expected during transient network issues
+        # and are non-fatal — we're about to construct a fresh connection
+        # anyway. Log at debug so the failure is visible if needed.
         if self.connection and self.connection.is_connected():
             try:
                 self.connection.disconnect()
-            except Exception:
-                pass
+            except (OSError, ConnectionError, stomp.exception.StompException) as e:
+                logger.debug(f"Pre-reconnect disconnect failed (non-fatal): {e}")
 
         self.connection = stomp.Connection12(
             [("publicdatafeeds.networkrail.co.uk", 61618)],
