@@ -333,294 +333,203 @@ class TestBarriersStayClosedForConsecutiveTrains:
         assert status.state == CrossingState.CLOSED_INFERRED
 
 
+
 @freeze_time(NOW)
-class TestRouteEnhancedPrediction:
-    """Tests for route-enhanced prediction — SF route data boosts confidence."""
+class TestRoutesIgnored:
+    """Routes are unconditionally ignored by the inferrer (see src/inferrer.py
+    docstring). Whatever `active_routes` value is supplied — None, [], or any
+    list of route names — the inferrer's output (state, confidence, reason,
+    predicted_change, predicted_next_state) must be identical to the no-routes
+    case. Routes are still observed by RouteMonitor and exposed via the API
+    + history for diagnostics; they just cannot influence prediction.
+    """
 
-    def test_at_crossing_with_routes_higher_confidence(self, inferrer, make_train):
-        """AT_CROSSING + routes SET → 0.95 confidence (was 0.9 without routes)."""
-        train = make_train(phase=TrainPhase.AT_CROSSING)
-        status = inferrer.update([train], FEED_RECENT, active_routes=["R35"])
-        assert status.state == CrossingState.CLOSED_INFERRED
-        assert status.confidence == 0.95
+    @pytest.fixture
+    def fresh_inferrer(self, test_config):
+        """Factory: returns a function that creates a brand-new inferrer.
+        Per-variant fresh inferrers prevent state-machine contamination."""
+        def _make():
+            return CrossingInferrer(copy.deepcopy(test_config))
+        return _make
 
-    def test_at_crossing_without_routes_normal_confidence(self, inferrer, make_train):
-        """AT_CROSSING without routes → 0.9 confidence (unchanged)."""
+    # ---- Headline regression: routes never change the verdict ----
+
+    @pytest.mark.parametrize("routes", [
+        None, [], ["R35"], ["R35", "RA007"], ["R29", "R32", "R34", "R35", "RA007"],
+    ])
+    def test_routes_only_no_trains_stays_open(self, fresh_inferrer, routes):
+        """Headline regression: routes SET, no trains → must stay OPEN.
+        Previously this was the route-only CLOSING_PREDICTED branch."""
+        status = fresh_inferrer().update([], FEED_RECENT, active_routes=routes)
+        assert status.state == CrossingState.OPEN
+        assert status.confidence == 0.8
+
+    @pytest.mark.parametrize("routes", [None, [], ["R35"], ["R35", "RA007"]])
+    def test_at_crossing_confidence_unchanged_by_routes(self, fresh_inferrer, make_train, routes):
+        """AT_CROSSING confidence is the no-routes value regardless."""
         train = make_train(phase=TrainPhase.AT_CROSSING)
-        status = inferrer.update([train], FEED_RECENT, active_routes=[])
+        status = fresh_inferrer().update([train], FEED_RECENT, active_routes=routes)
         assert status.state == CrossingState.CLOSED_INFERRED
         assert status.confidence == 0.9
 
-    def test_strike_in_with_routes_infers_closed(self, inferrer, make_train):
-        """STRIKE_IN + routes SET → CLOSED_INFERRED at 0.9 (not CLOSING_PREDICTED)."""
-        train = make_train(
-            phase=TrainPhase.STRIKE_IN,
-            predicted_at_crossing=NOW + timedelta(seconds=60),
-        )
-        status = inferrer.update([train], FEED_RECENT, active_routes=["R32"])
-        assert status.state == CrossingState.CLOSED_INFERRED
-        assert status.confidence == 0.9
-
-    def test_strike_in_without_routes_predicts_closing(self, inferrer, make_train):
-        """STRIKE_IN without routes → CLOSING_PREDICTED at 0.8 (unchanged)."""
-        train = make_train(
-            phase=TrainPhase.STRIKE_IN,
-            predicted_at_crossing=NOW + timedelta(seconds=60),
-        )
-        status = inferrer.update([train], FEED_RECENT, active_routes=[])
+    @pytest.mark.parametrize("routes", [None, [], ["R32"], ["R29", "R32"]])
+    def test_strike_in_with_routes_stays_closing_predicted(self, fresh_inferrer, make_train, routes):
+        """STRIKE_IN: routes can NOT promote to CLOSED_INFERRED."""
+        train = make_train(phase=TrainPhase.STRIKE_IN,
+                           predicted_at_crossing=NOW + timedelta(seconds=60))
+        status = fresh_inferrer().update([train], FEED_RECENT, active_routes=routes)
         assert status.state == CrossingState.CLOSING_PREDICTED
         assert status.confidence == 0.8
 
-    def test_approaching_with_routes_higher_confidence(self, inferrer, make_train):
-        """APPROACHING + routes SET → CLOSING_PREDICTED at 0.85 (was 0.6)."""
-        train = make_train(
-            phase=TrainPhase.APPROACHING,
-            predicted_at_crossing=NOW + timedelta(seconds=60),
-        )
-        status = inferrer.update([train], FEED_RECENT, active_routes=["RA007"])
-        assert status.state == CrossingState.CLOSING_PREDICTED
-        assert status.confidence == 0.85
-
-    def test_routes_only_no_trains_predicts_closing(self, inferrer):
-        """Routes SET but no trains visible → CLOSING_PREDICTED at 0.7 (early warning)."""
-        status = inferrer.update([], FEED_RECENT, active_routes=["R35"])
-        assert status.state == CrossingState.CLOSING_PREDICTED
-        assert status.confidence == 0.7
-
-    def test_no_routes_no_trains_stays_open(self, inferrer):
-        """No routes, no trains → OPEN (unchanged)."""
-        status = inferrer.update([], FEED_RECENT, active_routes=[])
+    @pytest.mark.parametrize("routes", [None, [], ["RA007"], ["R29", "RA007"]])
+    def test_far_approaching_train_stays_open(self, fresh_inferrer, make_train, routes):
+        """APPROACHING far away: routes do not pull state to CLOSING_PREDICTED.
+        Falls back to pre_closure_secs distance check (300s > 120s → OPEN)."""
+        train = make_train(phase=TrainPhase.APPROACHING,
+                           predicted_at_crossing=NOW + timedelta(seconds=300))
+        status = fresh_inferrer().update([train], FEED_RECENT, active_routes=routes)
         assert status.state == CrossingState.OPEN
 
-    def test_was_closed_routes_active_stays_closed(self, inferrer, make_train):
-        """Previously closed + routes still SET → stay CLOSED at 0.9."""
-        train = make_train(phase=TrainPhase.AT_CROSSING)
-        inferrer.update([train], FEED_RECENT)
-        assert inferrer.status.state == CrossingState.CLOSED_INFERRED
-
-        # Train clears, but keep approaching train + routes
-        approaching = make_train(
-            headcode="2B00",
-            phase=TrainPhase.APPROACHING,
-            predicted_at_crossing=NOW + timedelta(seconds=120),
-        )
-        status = inferrer.update([approaching], FEED_RECENT, active_routes=["R35"])
-        assert status.state == CrossingState.CLOSED_INFERRED
-        assert status.confidence == 0.9
-
-    def test_none_routes_backward_compat(self, inferrer, make_train):
-        """active_routes=None (not provided) → same behaviour as before."""
-        train = make_train(phase=TrainPhase.AT_CROSSING)
-        status = inferrer.update([train], FEED_RECENT)
-        assert status.state == CrossingState.CLOSED_INFERRED
-        assert status.confidence == 0.9
-
-    def test_routes_prevent_premature_opening(self, inferrer, make_train):
-        """After all trains clear, routes still SET → don't predict OPENING yet."""
-        train = make_train(phase=TrainPhase.AT_CROSSING)
-        inferrer.update([train], FEED_RECENT, active_routes=["R35"])
-
-        # All trains gone, but routes still active
-        status = inferrer.update([], FEED_RECENT, active_routes=["R35"])
-        assert status.state == CrossingState.CLOSING_PREDICTED
-        assert status.confidence == 0.7
-
-    def test_routes_clear_then_opening(self, inferrer, make_train):
-        """After trains AND routes clear → normal OPENING_PREDICTED flow."""
-        train = make_train(phase=TrainPhase.AT_CROSSING)
-        inferrer.update([train], FEED_RECENT, active_routes=["R35"])
-
-        # All trains and routes cleared
-        status = inferrer.update([], FEED_RECENT, active_routes=[])
-        assert status.state == CrossingState.OPENING_PREDICTED
-
-
-@freeze_time(NOW)
-class TestRouteOnlyOpeningPredicted:
-    """Tests for OPENING_PREDICTED triggered by route-clear alone (no AT_CROSSING ever).
-
-    For MCB-CCTV crossings, the signaller cannot set a route until barriers are
-    down + CCTV verified. So route SET implies barriers down. When the route
-    eventually clears with no train ever appearing in our berth zone (e.g. the
-    train route bypassed our zone, or we missed the steps), we should still
-    transition through OPENING_PREDICTED briefly — not jump straight to OPEN.
-    """
-
-    def test_route_only_clear_emits_opening_predicted(self, inferrer):
-        """Routes set with no trains, then routes clear → OPENING_PREDICTED."""
-        # Tick 1: routes set, no trains → CLOSING_PREDICTED via route-only branch
-        status = inferrer.update([], FEED_RECENT, active_routes=["R35"])
-        assert status.state == CrossingState.CLOSING_PREDICTED
-        assert status.confidence == 0.7
-
-        # Tick 2: routes clear, still no trains → OPENING_PREDICTED (not OPEN)
-        status = inferrer.update([], FEED_RECENT, active_routes=[])
-        assert status.state == CrossingState.OPENING_PREDICTED
-        assert status.predicted_next_state == CrossingState.OPEN
-        assert status.predicted_change is not None
-
-    def test_no_routes_initial_state_no_opening(self, inferrer):
-        """No prior routes, then call with no routes → straight to OPEN, no OPENING flicker."""
-        status = inferrer.update([], FEED_RECENT, active_routes=[])
-        assert status.state == CrossingState.OPEN
-
-    def test_route_only_then_clear_then_open_after_window(self, inferrer):
-        """OPENING_PREDICTED expires after post_clearance_secs → OPEN."""
+    def test_long_route_hold_does_not_downgrade_to_unknown(self, fresh_inferrer):
+        """The route-hold cap path is gone — even after many minutes of
+        routes-set state, we stay OPEN (not UNKNOWN)."""
         with freeze_time(NOW) as frozen:
-            inferrer.update([], datetime.now(timezone.utc), active_routes=["R35"])
-            inferrer.update([], datetime.now(timezone.utc), active_routes=[])
-            # Immediately after route clear: OPENING_PREDICTED
-            assert inferrer.status.state == CrossingState.OPENING_PREDICTED
+            inf = fresh_inferrer()
+            inf.update([], datetime.now(timezone.utc), active_routes=["R35"])
+            frozen.tick(delta=timedelta(seconds=2000))
+            status = inf.update([], datetime.now(timezone.utc), active_routes=["R35"])
+            assert status.state == CrossingState.OPEN
 
-            # Advance past the post_clearance window (5s in test config)
+    # ---- Reason strings stay route-free ----
+
+    @pytest.mark.parametrize("routes", [["R35"], ["R35", "RA007"], ["R29", "R32"]])
+    def test_reason_never_mentions_routes(self, fresh_inferrer, make_train, routes):
+        """Reason strings must not name routes when routes are present —
+        prevents misleading "route SET" wording when the inferrer ignored them."""
+        scenarios = [
+            ([], "no trains"),
+            ([make_train(phase=TrainPhase.AT_CROSSING)], "at crossing"),
+            ([make_train(phase=TrainPhase.STRIKE_IN,
+                         predicted_at_crossing=NOW + timedelta(seconds=60))], None),
+            ([make_train(phase=TrainPhase.APPROACHING,
+                         predicted_at_crossing=NOW + timedelta(seconds=60))], None),
+        ]
+        for trains, _ in scenarios:
+            inf = fresh_inferrer()
+            status = inf.update(trains, FEED_RECENT, active_routes=routes)
+            assert "route" not in status.reason.lower()
+            for r in routes:
+                assert r not in status.reason
+
+    # ---- Strict identity check across all major scenarios ----
+
+    @pytest.mark.parametrize("routes", [
+        None, [], ["R35"], ["R35", "RA007"], ["R29", "R32", "R34"],
+    ])
+    def test_full_output_identical_regardless_of_routes(
+        self, fresh_inferrer, make_train, routes
+    ):
+        """The strongest possible guarantee: for every scenario, the inferrer's
+        full output (state, confidence, reason, predicted_change,
+        predicted_next_state) is bit-for-bit identical to the routes=[] case.
+
+        Any future drift in the inferrer that reintroduces route influence
+        will fail this test. Each variant uses a freshly-constructed inferrer
+        so prior-state contamination cannot mask a leak.
+        """
+        scenarios = [
+            ("no trains", []),
+            ("at crossing", [make_train(phase=TrainPhase.AT_CROSSING)]),
+            ("strike-in",
+             [make_train(phase=TrainPhase.STRIKE_IN,
+                         predicted_at_crossing=NOW + timedelta(seconds=60))]),
+            ("at-station",
+             [make_train(phase=TrainPhase.AT_STATION,
+                         predicted_at_crossing=NOW + timedelta(seconds=90))]),
+            ("approaching close",
+             [make_train(phase=TrainPhase.APPROACHING,
+                         predicted_at_crossing=NOW + timedelta(seconds=60))]),
+            ("approaching far",
+             [make_train(phase=TrainPhase.APPROACHING,
+                         predicted_at_crossing=NOW + timedelta(seconds=300))]),
+            ("two trains",
+             [make_train(headcode="1A23", phase=TrainPhase.AT_CROSSING),
+              make_train(headcode="2B45", phase=TrainPhase.APPROACHING,
+                         predicted_at_crossing=NOW + timedelta(seconds=200))]),
+        ]
+        for label, trains in scenarios:
+            baseline_inf = fresh_inferrer()
+            baseline = baseline_inf.update(trains, FEED_RECENT, active_routes=[])
+            baseline_snapshot = (baseline.state, baseline.confidence, baseline.reason,
+                                 baseline.predicted_change, baseline.predicted_next_state)
+
+            variant_inf = fresh_inferrer()
+            variant = variant_inf.update(trains, FEED_RECENT, active_routes=routes)
+            variant_snapshot = (variant.state, variant.confidence, variant.reason,
+                                variant.predicted_change, variant.predicted_next_state)
+
+            assert baseline_snapshot == variant_snapshot, (
+                f"Routes leaked into prediction for scenario {label!r} with "
+                f"routes={routes!r}\n  baseline: {baseline_snapshot}\n  "
+                f"variant:  {variant_snapshot}")
+
+    # ---- Stateful identity check (transitions) ----
+
+    @pytest.mark.parametrize("routes", [None, [], ["R35"], ["R35", "RA007"]])
+    def test_post_clearance_window_unchanged_by_routes(
+        self, fresh_inferrer, make_train, routes
+    ):
+        """OPENING_PREDICTED → OPEN flow happens identically whether routes
+        are present during the clearance window or not."""
+        with freeze_time(NOW) as frozen:
+            inf = fresh_inferrer()
+            train = make_train(phase=TrainPhase.AT_CROSSING)
+            inf.update([train], datetime.now(timezone.utc), active_routes=routes)
+            assert inf.status.state == CrossingState.CLOSED_INFERRED
+
+            # All trains gone, routes still present (or absent — tested both)
+            status = inf.update([], datetime.now(timezone.utc), active_routes=routes)
+            assert status.state == CrossingState.OPENING_PREDICTED
+
+            # After post_clearance window, routes still present → OPEN
             frozen.tick(delta=timedelta(seconds=10))
-            status = inferrer.update([], datetime.now(timezone.utc), active_routes=[])
+            status = inf.update([], datetime.now(timezone.utc), active_routes=routes)
             assert status.state == CrossingState.OPEN
 
 
 @freeze_time(NOW)
-class TestRouteHoldCap:
-    """Tests for the route-hold cap: route-only inference shouldn't last forever.
-
-    Stuck routes (240s lock-after-cancel, signal failure, signaller anomaly)
-    can persist with no train ever passing. After max_route_hold_secs, we
-    downgrade to UNKNOWN rather than asserting CLOSED indefinitely.
-    """
-
-    def test_short_route_hold_stays_closing_predicted(self, inferrer):
-        """Route held briefly (< cap) → stays CLOSING_PREDICTED."""
-        with freeze_time(NOW) as frozen:
-            status = inferrer.update([], datetime.now(timezone.utc), active_routes=["R35"])
-            assert status.state == CrossingState.CLOSING_PREDICTED
-
-            frozen.tick(delta=timedelta(seconds=300))  # 5 min, under the cap
-            status = inferrer.update([], datetime.now(timezone.utc), active_routes=["R35"])
-            assert status.state == CrossingState.CLOSING_PREDICTED
-            assert status.confidence == 0.7
-
-    def test_long_route_hold_downgrades_to_unknown(self, inferrer):
-        """Route held > max_route_hold_secs → UNKNOWN with low confidence."""
-        with freeze_time(NOW) as frozen:
-            inferrer.update([], datetime.now(timezone.utc), active_routes=["R35"])
-            assert inferrer.status.state == CrossingState.CLOSING_PREDICTED
-
-            # Cap is 900s in test config; advance past it
-            frozen.tick(delta=timedelta(seconds=901))
-            status = inferrer.update([], datetime.now(timezone.utc), active_routes=["R35"])
-            assert status.state == CrossingState.UNKNOWN
-            assert status.confidence == 0.3
-
-    def test_route_hold_resets_when_train_appears(self, inferrer, make_train):
-        """If a train appears, the routes-only timer resets — long subsequent route holds OK."""
-        with freeze_time(NOW) as frozen:
-            inferrer.update([], datetime.now(timezone.utc), active_routes=["R35"])
-
-            # Cap nearly hit; train arrives in time to reset the timer
-            frozen.tick(delta=timedelta(seconds=890))
-            train = make_train(phase=TrainPhase.AT_CROSSING)
-            inferrer.update([train], datetime.now(timezone.utc), active_routes=["R35"])
-            assert inferrer.status.state == CrossingState.CLOSED_INFERRED
-
-            # Train clears, routes still active — back to route-only branch.
-            # Per existing behaviour (test_routes_prevent_premature_opening), we
-            # downgrade to CLOSING_PREDICTED 0.7 when no trains + routes only.
-            # The cap timer restarts here because _routes_only_since was reset.
-            frozen.tick(delta=timedelta(seconds=10))
-            status = inferrer.update([], datetime.now(timezone.utc), active_routes=["R35"])
-            assert status.state == CrossingState.CLOSING_PREDICTED
-            assert status.confidence == 0.7
-
-            # Hitting the cap requires another full max_route_hold_secs from now.
-            # Half the cap → still CLOSING_PREDICTED.
-            frozen.tick(delta=timedelta(seconds=450))
-            status = inferrer.update([], datetime.now(timezone.utc), active_routes=["R35"])
-            assert status.state == CrossingState.CLOSING_PREDICTED
-
-            # Past the cap → UNKNOWN.
-            frozen.tick(delta=timedelta(seconds=500))
-            status = inferrer.update([], datetime.now(timezone.utc), active_routes=["R35"])
-            assert status.state == CrossingState.UNKNOWN
-
-    def test_route_hold_resets_when_routes_clear(self, inferrer):
-        """When routes briefly clear and re-set, the timer restarts."""
-        with freeze_time(NOW) as frozen:
-            inferrer.update([], datetime.now(timezone.utc), active_routes=["R35"])
-
-            # Routes briefly clear
-            frozen.tick(delta=timedelta(seconds=500))
-            inferrer.update([], datetime.now(timezone.utc), active_routes=[])
-
-            # Routes set again — fresh start, well under cap
-            frozen.tick(delta=timedelta(seconds=600))
-            status = inferrer.update([], datetime.now(timezone.utc), active_routes=["R35"])
-            assert status.state == CrossingState.CLOSING_PREDICTED
-
-            # Need full cap from this point to hit UNKNOWN
-            frozen.tick(delta=timedelta(seconds=400))
-            status = inferrer.update([], datetime.now(timezone.utc), active_routes=["R35"])
-            assert status.state == CrossingState.CLOSING_PREDICTED  # 400s held, under 900s cap
-
-
-@freeze_time(NOW)
 class TestStateReason:
-    """Every state transition should record a human-readable reason explaining
-    why that state was entered. Useful for /live debug view and history audit.
-
-    These tests verify that meaningful reason strings are populated on every
-    code path. They check for substrings rather than exact text so the wording
-    can be tweaked without breaking tests.
+    """Every state transition records a human-readable reason. These tests
+    verify that meaningful reason strings are populated on every code path.
+    They check for substrings rather than exact text so wording can be
+    tweaked without breaking tests.
     """
 
-    def test_open_no_trains_no_routes_reason(self, inferrer):
-        status = inferrer.update([], FEED_RECENT, active_routes=[])
+    def test_open_no_trains_reason(self, inferrer):
+        status = inferrer.update([], FEED_RECENT)
         assert status.state == CrossingState.OPEN
         assert status.reason is not None
         assert "no trains" in status.reason.lower()
 
     def test_at_crossing_reason_includes_headcode(self, inferrer, make_train):
         train = make_train(headcode="1A23", phase=TrainPhase.AT_CROSSING)
-        status = inferrer.update([train], FEED_RECENT, active_routes=[])
+        status = inferrer.update([train], FEED_RECENT)
         assert status.state == CrossingState.CLOSED_INFERRED
         assert "1A23" in status.reason
         assert "at crossing" in status.reason.lower()
 
-    def test_at_crossing_with_routes_reason_mentions_routes(self, inferrer, make_train):
-        train = make_train(phase=TrainPhase.AT_CROSSING)
-        status = inferrer.update([train], FEED_RECENT, active_routes=["R35", "RA007"])
-        assert status.state == CrossingState.CLOSED_INFERRED
-        assert "R35" in status.reason or "RA007" in status.reason
-        assert "route" in status.reason.lower()
-
-    def test_strike_in_with_routes_reason(self, inferrer, make_train):
+    def test_strike_in_reason_includes_headcode(self, inferrer, make_train):
         train = make_train(headcode="2B45", phase=TrainPhase.STRIKE_IN,
                            predicted_at_crossing=NOW + timedelta(seconds=60))
-        status = inferrer.update([train], FEED_RECENT, active_routes=["R32"])
-        assert status.state == CrossingState.CLOSED_INFERRED
+        status = inferrer.update([train], FEED_RECENT)
+        assert status.state == CrossingState.CLOSING_PREDICTED
         assert "2B45" in status.reason
-        assert "R32" in status.reason
         assert "strike-in" in status.reason.lower()
-
-    def test_strike_in_without_routes_reason(self, inferrer, make_train):
-        train = make_train(headcode="2B45", phase=TrainPhase.STRIKE_IN,
-                           predicted_at_crossing=NOW + timedelta(seconds=60))
-        status = inferrer.update([train], FEED_RECENT, active_routes=[])
-        assert status.state == CrossingState.CLOSING_PREDICTED
-        assert "2B45" in status.reason
-        assert "no route" in status.reason.lower()
-
-    def test_approaching_with_routes_reason(self, inferrer, make_train):
-        train = make_train(headcode="1A23", phase=TrainPhase.APPROACHING,
-                           predicted_at_crossing=NOW + timedelta(seconds=200))
-        status = inferrer.update([train], FEED_RECENT, active_routes=["R29"])
-        assert status.state == CrossingState.CLOSING_PREDICTED
-        assert "1A23" in status.reason
-        assert "R29" in status.reason
-        assert "approaching" in status.reason.lower()
 
     def test_approaching_within_pre_closure_reason(self, inferrer, make_train):
         train = make_train(headcode="1A23", phase=TrainPhase.APPROACHING,
                            predicted_at_crossing=NOW + timedelta(seconds=60))
-        status = inferrer.update([train], FEED_RECENT, active_routes=[])
+        status = inferrer.update([train], FEED_RECENT)
         assert status.state == CrossingState.CLOSING_PREDICTED
         assert "1A23" in status.reason
         assert "pre_closure" in status.reason.lower() or "60s" in status.reason
@@ -628,136 +537,48 @@ class TestStateReason:
     def test_approaching_distant_reason(self, inferrer, make_train):
         train = make_train(headcode="1A23", phase=TrainPhase.APPROACHING,
                            predicted_at_crossing=NOW + timedelta(seconds=600))
-        status = inferrer.update([train], FEED_RECENT, active_routes=[])
+        status = inferrer.update([train], FEED_RECENT)
         assert status.state == CrossingState.OPEN
         assert "1A23" in status.reason
         assert "outside" in status.reason.lower()
 
-    def test_route_only_reason_lists_routes(self, inferrer):
-        status = inferrer.update([], FEED_RECENT, active_routes=["R35", "RA007"])
-        assert status.state == CrossingState.CLOSING_PREDICTED
-        assert "R35" in status.reason
-        assert "RA007" in status.reason
-        assert "no train" in status.reason.lower()
-
-    def test_route_hold_timeout_reason(self, inferrer):
-        with freeze_time(NOW) as frozen:
-            inferrer.update([], datetime.now(timezone.utc), active_routes=["R35"])
-            frozen.tick(delta=timedelta(seconds=901))
-            status = inferrer.update([], datetime.now(timezone.utc), active_routes=["R35"])
-            assert status.state == CrossingState.UNKNOWN
-            assert "stuck" in status.reason.lower() or "timeout" in status.reason.lower()
-            assert "R35" in status.reason
-
-    def test_stale_data_reason(self, inferrer, make_train):
+    def test_stale_data_reason(self, inferrer):
         very_old_feed = NOW - timedelta(seconds=400)
-        status = inferrer.update([], very_old_feed, active_routes=[])
+        status = inferrer.update([], very_old_feed)
         assert status.state == CrossingState.STALE_DATA
         assert "feed" in status.reason.lower()
 
     def test_opening_predicted_reason(self, inferrer, make_train):
         # Train at crossing, then clears
         train = make_train(phase=TrainPhase.AT_CROSSING)
-        inferrer.update([train], FEED_RECENT, active_routes=[])
-        status = inferrer.update([], FEED_RECENT, active_routes=[])
+        inferrer.update([train], FEED_RECENT)
+        status = inferrer.update([], FEED_RECENT)
         assert status.state == CrossingState.OPENING_PREDICTED
         assert "post-clearance" in status.reason.lower() or "cctv" in status.reason.lower()
 
     def test_was_closed_reason_mentions_held(self, inferrer, make_train):
         # Get into CLOSED_INFERRED first
         train = make_train(headcode="1A23", phase=TrainPhase.AT_CROSSING)
-        inferrer.update([train], FEED_RECENT, active_routes=[])
-        # Now follow with a strike-in train (simulating consecutive trains): was_closed branch fires
+        inferrer.update([train], FEED_RECENT)
+        # Now follow with a strike-in train (consecutive trains): was_closed branch
         next_train = make_train(headcode="2B45", phase=TrainPhase.STRIKE_IN,
                                 predicted_at_crossing=NOW + timedelta(seconds=60))
-        status = inferrer.update([next_train], FEED_RECENT, active_routes=[])
+        status = inferrer.update([next_train], FEED_RECENT)
         assert status.state == CrossingState.CLOSED_INFERRED
         assert "held closed" in status.reason.lower() or "still active" in status.reason.lower()
 
     def test_reason_is_set_on_every_state(self, inferrer, make_train):
         """Defensive check: reason should never be None after a state is set."""
         scenarios = [
-            ([], FEED_RECENT, []),                                                     # OPEN
-            ([], FEED_RECENT, ["R35"]),                                                # CLOSING_PREDICTED route-only
-            ([make_train(phase=TrainPhase.AT_CROSSING)], FEED_RECENT, []),             # CLOSED_INFERRED
+            ([], FEED_RECENT),                                                          # OPEN
+            ([make_train(phase=TrainPhase.AT_CROSSING)], FEED_RECENT),                  # CLOSED_INFERRED
             ([make_train(phase=TrainPhase.STRIKE_IN,
                          predicted_at_crossing=NOW + timedelta(seconds=60))],
-             FEED_RECENT, []),                                                          # CLOSING_PREDICTED
-            ([], NOW - timedelta(seconds=400), []),                                    # STALE_DATA
+             FEED_RECENT),                                                              # CLOSING_PREDICTED
+            ([], NOW - timedelta(seconds=400)),                                         # STALE_DATA
         ]
-        for trains, feed, routes in scenarios:
+        for trains, feed in scenarios:
             inferrer = type(inferrer)(inferrer.config)  # fresh inferrer per scenario
-            status = inferrer.update(trains, feed, active_routes=routes)
+            status = inferrer.update(trains, feed)
             assert status.reason is not None, f"reason missing for state {status.state}"
             assert len(status.reason) > 0, f"reason empty for state {status.state}"
-
-
-@freeze_time(NOW)
-class TestRoutesDisabled:
-    """Tests for inference.use_routes=False (the production default after the
-    2026-05-08 regression, when route-based inference produced false positives).
-
-    With routes disabled, the inferrer must behave identically whether
-    `active_routes` is None, [], or a list of route names — routes are
-    completely ignored for state derivation. Routes are still observed,
-    logged in sf_events, and shown on /live; only their effect on the
-    inferred state is suppressed.
-    """
-
-    @pytest.fixture
-    def routes_off_inferrer(self, test_config):
-        cfg = copy.deepcopy(test_config)
-        cfg.setdefault("inference", {})["use_routes"] = False
-        return CrossingInferrer(cfg)
-
-    def test_routes_only_no_trains_stays_open_when_disabled(self, routes_off_inferrer):
-        """The biggest regression case: routes SET, no train in our zone →
-        previously CLOSING_PREDICTED 0.7. With routes disabled, must stay OPEN."""
-        status = routes_off_inferrer.update([], FEED_RECENT, active_routes=["R35", "RA007"])
-        assert status.state == CrossingState.OPEN
-        assert status.confidence == 0.8
-
-    def test_at_crossing_confidence_unchanged_by_routes(self, routes_off_inferrer, make_train):
-        """AT_CROSSING with routes provided: confidence must be the no-routes value."""
-        train = make_train(phase=TrainPhase.AT_CROSSING)
-        status = routes_off_inferrer.update([train], FEED_RECENT, active_routes=["R35"])
-        assert status.state == CrossingState.CLOSED_INFERRED
-        assert status.confidence == 0.9  # NOT 0.95 (which is the route-boosted value)
-
-    def test_strike_in_with_routes_returns_closing_not_closed(self, routes_off_inferrer, make_train):
-        """STRIKE_IN + route: previously promoted to CLOSED_INFERRED.
-        With routes disabled, must stay CLOSING_PREDICTED."""
-        train = make_train(phase=TrainPhase.STRIKE_IN,
-                           predicted_at_crossing=NOW + timedelta(seconds=60))
-        status = routes_off_inferrer.update([train], FEED_RECENT, active_routes=["R32"])
-        assert status.state == CrossingState.CLOSING_PREDICTED
-        assert status.confidence == 0.8  # no-route value
-
-    def test_approaching_with_routes_uses_pre_closure_logic(self, routes_off_inferrer, make_train):
-        """APPROACHING + route: previously CLOSING_PREDICTED 0.85 regardless of distance.
-        With routes disabled, falls back to pre_closure_secs distance check."""
-        # Far-out train that would have been CLOSING_PREDICTED with routes
-        train = make_train(phase=TrainPhase.APPROACHING,
-                           predicted_at_crossing=NOW + timedelta(seconds=300))
-        status = routes_off_inferrer.update([train], FEED_RECENT, active_routes=["RA007"])
-        # 300s out, pre_closure 120s → outside window → OPEN
-        assert status.state == CrossingState.OPEN
-
-    def test_route_hold_cap_does_not_fire_when_disabled(self, routes_off_inferrer):
-        """Route-hold cap path is dead when routes are disabled — even after
-        many minutes of routes-set state, we stay OPEN (not UNKNOWN)."""
-        with freeze_time(NOW) as frozen:
-            routes_off_inferrer.update([], datetime.now(timezone.utc), active_routes=["R35"])
-            frozen.tick(delta=timedelta(seconds=2000))
-            status = routes_off_inferrer.update([], datetime.now(timezone.utc), active_routes=["R35"])
-            assert status.state == CrossingState.OPEN
-            # not UNKNOWN — the route-hold cap requires routes-only state which
-            # never gets entered when routes are disabled
-
-    def test_reason_does_not_mention_routes_when_disabled(self, routes_off_inferrer, make_train):
-        """The reason string should not mention routes when they're being ignored."""
-        train = make_train(phase=TrainPhase.AT_CROSSING)
-        status = routes_off_inferrer.update([train], FEED_RECENT, active_routes=["R35", "R32"])
-        assert "route" not in status.reason.lower()
-        assert "R35" not in status.reason
-        assert "R32" not in status.reason

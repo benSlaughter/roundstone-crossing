@@ -1,5 +1,13 @@
 """
 Crossing state inferrer — derives crossing state from the set of active trains.
+
+NOTE: Route data (SF/SG signalling) is intentionally NOT used for prediction.
+The `active_routes` parameter on `update()` is accepted for backward
+compatibility with callers and tests but is unconditionally ignored. Routes
+are still observed by `RouteMonitor` and exposed via the API + history table
+for diagnostic purposes — they just cannot influence inferred state. See
+PR / commit history for the 2026-05-08 production regression that motivated
+removing route-based inference.
 """
 
 import logging
@@ -12,46 +20,37 @@ logger = logging.getLogger("crossing.inferrer")
 
 
 class CrossingInferrer:
-    """Infers crossing barrier state from tracked trains and route data."""
+    """Infers crossing barrier state from tracked trains.
+
+    Route data is intentionally not consumed (see module docstring).
+    """
 
     def __init__(self, config: dict):
         self.config = config
         self.status = CrossingStatus()
         self._timing = config.get("timing", {})
-        self._inference = config.get("inference", {})
         self._last_clear_time: datetime | None = None
-        # Tracks when the route-only "barriers down" inference began. Used to
-        # cap that inference (stuck routes shouldn't keep us locked in CLOSED
-        # forever) and to support OPENING_PREDICTED when the route eventually
-        # clears with no train ever appearing in our berth zone.
-        self._routes_only_since: datetime | None = None
 
     def update(self, active_trains: list[TrackedTrain], last_feed_time: datetime | None,
                active_routes: list[str] | None = None):
-        """Re-derive crossing state from the current set of active trains and route state.
+        """Re-derive crossing state from the current set of active trains.
 
         Args:
             active_trains: Currently tracked trains near the crossing.
             last_feed_time: Timestamp of last received feed message.
-            active_routes: List of crossing route names currently SET (from RouteMonitor).
-                          None means route data unavailable (backward compat).
-                          Will be ignored entirely if `inference.use_routes` is False.
+            active_routes: IGNORED. Accepted for backward compatibility only.
+                Route observation has been deliberately decoupled from
+                prediction — see module docstring.
         """
+        # Route data is unconditionally discarded before any state logic
+        # runs. Tests parametrise across a range of `active_routes` values
+        # and assert the inferrer's output is identical regardless.
+        del active_routes
+
         now = datetime.now(timezone.utc)
         old_state = self.status.state
         self.status.active_trains = active_trains
         self.status.last_feed_message = last_feed_time
-
-        # Honour the inference.use_routes config flag. When False, routes are
-        # ignored for state derivation entirely (they are still observed,
-        # logged to sf_events and shown on /live — this only affects the
-        # state machine). Default False after production regression where
-        # route-based inference reported CLOSED while barriers were OPEN.
-        if not self._inference.get("use_routes", False):
-            active_routes = None
-
-        routes = active_routes or []
-        has_routes = len(routes) > 0
 
         # Check for stale data
         stale_threshold = self._timing.get("stale_threshold_secs", 300)
@@ -62,48 +61,13 @@ class CrossingInferrer:
             return self.status
 
         if not active_trains:
-            if has_routes:
-                # No trains visible but routes are still SET — barriers likely still down
-                # This catches the gap between route SET and train appearing in our zone.
-                if self._routes_only_since is None:
-                    self._routes_only_since = now
-                held = (now - self._routes_only_since).total_seconds()
-
-                # Cap the "barriers down" inference: if routes have been SET for
-                # too long with no train activity, the route is probably stuck
-                # (240s lock-after-cancel, signal failure, or signaller anomaly).
-                # Admit uncertainty rather than assert CLOSED indefinitely.
-                max_hold = self._timing.get("max_route_hold_secs", 900)
-                if held > max_hold:
-                    self._transition(
-                        CrossingState.UNKNOWN, confidence=0.3,
-                        reason=f"route hold timeout ({held:.0f}s > {max_hold}s) "
-                               f"with no train activity — routes probably stuck "
-                               f"(active: {','.join(sorted(routes))})",
-                    )
-                    return self.status
-
-                # Track _last_clear_time so OPENING_PREDICTED fires briefly when
-                # the route eventually clears (signaller verifies CCTV before
-                # raising barriers — same flow as a normal post-train clearance).
-                self._last_clear_time = now
-                self._transition(
-                    CrossingState.CLOSING_PREDICTED, confidence=0.7,
-                    reason=f"route SET, no train in zone yet "
-                           f"({','.join(sorted(routes))}) — early warning",
-                )
-                return self.status
-
-            # No trains AND no routes — leaving any route-only state.
-            self._routes_only_since = None
-
             # Check if we just cleared — show OPENING_PREDICTED briefly
             post_clearance = self._timing.get("post_clearance_secs", 15)
             if (self._last_clear_time
                     and (now - self._last_clear_time).total_seconds() < post_clearance):
                 self._transition(
                     CrossingState.OPENING_PREDICTED, confidence=0.8,
-                    reason=f"all trains/routes cleared — post-clearance window "
+                    reason=f"all trains cleared — post-clearance window "
                            f"({post_clearance}s, signaller verifying CCTV)",
                 )
                 open_at = self._last_clear_time + timedelta(seconds=post_clearance)
@@ -111,12 +75,9 @@ class CrossingInferrer:
                 self.status.predicted_next_state = CrossingState.OPEN
             else:
                 self._transition(CrossingState.OPEN, confidence=0.8,
-                                 reason="no trains in zone, no routes set")
+                                 reason="no trains in zone")
                 self._last_clear_time = None
             return self.status
-
-        # Trains active — leaving any route-only state.
-        self._routes_only_since = None
 
         # Classify based on the "most advanced" train phase
         phases = [t.phase for t in active_trains]
@@ -128,74 +89,41 @@ class CrossingInferrer:
 
         if TrainPhase.AT_CROSSING in phases:
             # Train is at the crossing — barriers almost certainly down
-            confidence = 0.95 if has_routes else 0.9
             at_xng = [t.headcode for t in active_trains if t.phase == TrainPhase.AT_CROSSING]
-            route_str = f" + routes ({','.join(sorted(routes))})" if has_routes else ""
             self._transition(
-                CrossingState.CLOSED_INFERRED, confidence=confidence,
-                reason=f"train at crossing: {','.join(at_xng)}{route_str}",
+                CrossingState.CLOSED_INFERRED, confidence=0.9,
+                reason=f"train at crossing: {','.join(at_xng)}",
             )
             self._last_clear_time = now
             self.status.predicted_change = self._predict_opening(active_trains)
             self.status.predicted_next_state = CrossingState.OPENING_PREDICTED
 
         elif was_closed:
-            # Barriers already down — keep them down while trains or routes remain active
-            confidence = 0.9 if has_routes else 0.85
+            # Barriers already down — keep them down while trains remain active
             train_count = len(active_trains)
-            route_str = f", {len(routes)} route(s) still SET" if has_routes else ""
             self._transition(
-                CrossingState.CLOSED_INFERRED, confidence=confidence,
-                reason=f"barriers held closed — {train_count} train(s) "
-                       f"still active{route_str}",
-            )
-            self._last_clear_time = now
-            self.status.predicted_change = self._predict_opening(active_trains)
-            self.status.predicted_next_state = CrossingState.OPENING_PREDICTED
-
-        elif (TrainPhase.STRIKE_IN in phases or TrainPhase.AT_STATION in phases) and has_routes:
-            # Strike-in/station AND route SET — barriers ARE down (MCB-CCTV procedure)
-            nearest = (self._nearest_train(active_trains, TrainPhase.STRIKE_IN)
-                       or self._nearest_train(active_trains, TrainPhase.AT_STATION))
-            hc = nearest.headcode if nearest else "?"
-            phase_label = "strike-in" if TrainPhase.STRIKE_IN in phases else "at-station"
-            self._transition(
-                CrossingState.CLOSED_INFERRED, confidence=0.9,
-                reason=f"{phase_label} train ({hc}) + route SET "
-                       f"({','.join(sorted(routes))}) — MCB-CCTV procedure "
-                       f"requires barriers down before route can be set",
+                CrossingState.CLOSED_INFERRED, confidence=0.85,
+                reason=f"barriers held closed — {train_count} train(s) still active",
             )
             self._last_clear_time = now
             self.status.predicted_change = self._predict_opening(active_trains)
             self.status.predicted_next_state = CrossingState.OPENING_PREDICTED
 
         elif TrainPhase.STRIKE_IN in phases or TrainPhase.AT_STATION in phases:
-            # Strike-in without route data — same as before
+            # Strike-in: barriers likely lowering / about to lower
             nearest = (self._nearest_train(active_trains, TrainPhase.STRIKE_IN)
                        or self._nearest_train(active_trains, TrainPhase.AT_STATION))
             hc = nearest.headcode if nearest else "?"
             phase_label = "strike-in" if TrainPhase.STRIKE_IN in phases else "at-station"
             self._transition(
                 CrossingState.CLOSING_PREDICTED, confidence=0.8,
-                reason=f"{phase_label} train ({hc}) but no route confirmation",
-            )
-            self.status.predicted_change = nearest.predicted_at_crossing if nearest else None
-            self.status.predicted_next_state = CrossingState.CLOSED_INFERRED
-
-        elif TrainPhase.APPROACHING in phases and has_routes:
-            # Approaching train with route SET — barriers likely lowering already
-            nearest = self._nearest_train(active_trains, TrainPhase.APPROACHING)
-            hc = nearest.headcode if nearest else "?"
-            self._transition(
-                CrossingState.CLOSING_PREDICTED, confidence=0.85,
-                reason=f"approaching train ({hc}) + route SET "
-                       f"({','.join(sorted(routes))}) — barriers likely down",
+                reason=f"{phase_label} train ({hc}) — predicting closure",
             )
             self.status.predicted_change = nearest.predicted_at_crossing if nearest else None
             self.status.predicted_next_state = CrossingState.CLOSED_INFERRED
 
         elif TrainPhase.APPROACHING in phases:
-            # Train approaching but not yet in strike-in (no route info)
+            # Train approaching but not yet in strike-in
             nearest = self._nearest_train(active_trains, TrainPhase.APPROACHING)
             pre_closure = self._timing.get("pre_closure_secs", 120)
 
@@ -236,10 +164,9 @@ class CrossingInferrer:
                              reason="no train in approach/strike-in/at-crossing phase")
 
         if self.status.state != old_state:
-            route_str = f", routes={len(routes)}" if routes else ""
             logger.info(f"Crossing: {old_state.value} -> {self.status.state.value} "
                         f"(confidence={self.status.confidence:.1%}, "
-                        f"trains={len(active_trains)}{route_str}) "
+                        f"trains={len(active_trains)}) "
                         f"reason: {self.status.reason}")
 
         return self.status

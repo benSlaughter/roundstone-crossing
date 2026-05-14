@@ -67,6 +67,22 @@ def validate_config(config: dict) -> None:
     if errors:
         raise SystemExit("Config validation failed:\n  - " + "\n  - ".join(errors))
 
+    # Routes are intentionally not used for prediction (see src/inferrer.py
+    # docstring). Fail loudly if a deployment tries to re-enable via config —
+    # re-enabling now requires a real code change, not a flag flip.
+    use_routes = config.get("inference", {}).get("use_routes")
+    if use_routes is True:
+        raise SystemExit(
+            "Config validation failed:\n"
+            "  - inference.use_routes is set to True, but route-based "
+            "prediction has been removed from the codebase. Remove the key "
+            "from config.yaml or set it to False. To re-enable, restore the "
+            "route-aware branches in src/inferrer.py.")
+    if use_routes is False:
+        logger.warning(
+            "config.yaml: inference.use_routes is set but ignored — route data "
+            "is no longer consumed by the inferrer. You can remove this key.")
+
 
 def run_predictor(config: dict, with_api: bool = False):
     """Main loop: connect to feeds, track trains, infer state, log history."""
@@ -88,10 +104,10 @@ def run_predictor(config: dict, with_api: bool = False):
     tracker.history = history
 
     # Provenance: a short hash of the config sections that drive inference.
-    # If any of these change (timing, inference flags, berth zones, routes),
-    # downstream prediction analysis can detect the change and avoid mixing
-    # apples and oranges.
-    inference_keys = ("timing", "inference", "td", "routes")
+    # Route data is not consumed by the inferrer (see src/inferrer.py
+    # docstring), so neither `routes` nor `inference` are included here —
+    # changing them must NOT split downstream prediction analysis.
+    inference_keys = ("timing", "td")
     prov = {k: config.get(k) for k in inference_keys}
     config_hash = hashlib.sha256(
         _json.dumps(prov, sort_keys=True, default=str).encode("utf-8")

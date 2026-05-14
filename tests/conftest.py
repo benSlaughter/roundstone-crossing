@@ -31,15 +31,11 @@ def test_config():
             "crossing_clearance_secs": 10,
             "min_warning_secs": 27,
             "stale_threshold_secs": 300,
-            "max_route_hold_secs": 900,
         },
-        # Tests default to use_routes=True so the legacy/intended route-aware
-        # behaviour stays under test coverage. The production config
-        # (config.yaml) defaults this to False after the 2026-05-08 regression.
-        # Tests that need route-disabled behaviour create their own config.
-        "inference": {
-            "use_routes": True,
-        },
+        # Inference toggles. The inferrer no longer reads `use_routes` —
+        # routes are unconditionally ignored for prediction. See
+        # src/inferrer.py docstring.
+        "inference": {},
         "trust": {
             "timing_points": [
                 {"tiploc": "ANGMRNG", "stanox": "87998", "direction": "up",

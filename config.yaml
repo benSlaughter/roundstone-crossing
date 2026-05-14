@@ -91,31 +91,18 @@ timing:
   # If no TD/TRUST data for this long, mark state as STALE
   stale_threshold_secs: 300
 
-  # Cap for "barriers down" inferences from routes alone (no trains in our zone).
-  # If routes have been SET this long without train activity, downgrade to UNKNOWN.
-  # Stuck routes (240s lock-after-cancel, signal failure, etc.) shouldn't keep us
-  # locked in CLOSED indefinitely. 15 min comfortably exceeds normal closure (5-8 min).
-  max_route_hold_secs: 900
-
 # Inference behaviour toggles.
-inference:
-  # When true, the inferrer uses observed SF route SETs as evidence that
-  # barriers are down (route SET implies barriers down for MCB-CCTV
-  # crossings per the published procedure).
-  #
-  # CURRENTLY DISABLED (2026-05-08): production observed significant false
-  # positives — the app reported CLOSED while barriers were actually OPEN
-  # (verified by driving through). The route → barrier correlation is more
-  # complex than the published procedure suggests, and we don't yet have a
-  # state-coverage metric to evaluate the trade-off rigorously.
-  #
-  # Routes are still monitored, logged in sf_events, and displayed on the
-  # /live debug view — only their effect on inferred state is suppressed.
-  #
-  # Re-enable only after building a proper coverage metric (see the
-  # 'better-metrics' improvement) and validating against ground-truth
-  # observations.
-  use_routes: false
+#
+# inference.use_routes was removed from the inferrer in 2026-05. Route data
+# from SF/SG signalling messages is still observed (RouteMonitor) and
+# exposed via the API + history table for diagnostics, but does NOT
+# influence the predicted crossing state. To re-enable route-based
+# inference you must restore the route-aware branches in src/inferrer.py
+# AND have a state-coverage metric in place to validate the trade-off.
+#
+# Setting `inference.use_routes: true` in this file will FAIL config
+# validation at startup as a safety net against accidental re-enable.
+inference: {}
 
 # TRUST timing points near the crossing (for fallback when TD unavailable)
 # Offsets calibrated against SMART berth-step data (BPLAN, via vaildata.uk):
