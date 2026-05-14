@@ -1,11 +1,16 @@
 """Tests for the API endpoints."""
 
+from datetime import datetime, timezone
+
 import pytest
 from fastapi.testclient import TestClient
+from freezegun import freeze_time
 from unittest.mock import MagicMock, patch
 
 from src.api import create_app
 from src.models import TrackedTrain, Direction, TrainPhase
+
+NOW = datetime(2026, 5, 15, 12, 0, 0, tzinfo=timezone.utc)
 
 
 @pytest.fixture
@@ -184,6 +189,7 @@ def test_predictions_windows_empty(tracker, inferrer, history_db):
     assert "generated_at" in data
 
 
+@freeze_time(NOW)
 def test_predictions_windows_eastbound(tracker, inferrer, history_db):
     """Eastbound train at ANG produces a closure window."""
     mock_rtt = MagicMock()
@@ -209,6 +215,7 @@ def test_predictions_windows_eastbound(tracker, inferrer, history_db):
     assert w["duration_secs"] > 0
 
 
+@freeze_time(NOW)
 def test_predictions_windows_westbound(tracker, inferrer, history_db):
     """Westbound train at GBS produces a closure window."""
     mock_rtt = MagicMock()
@@ -231,6 +238,7 @@ def test_predictions_windows_westbound(tracker, inferrer, history_db):
     assert data["windows"][0]["trains"][0]["direction"] == "west"
 
 
+@freeze_time(NOW)
 def test_predictions_windows_filters_wrong_direction(tracker, inferrer, history_db):
     """Westbound at ANG (past crossing) and eastbound at GBS (past crossing) are excluded."""
     mock_rtt = MagicMock()
@@ -251,6 +259,7 @@ def test_predictions_windows_filters_wrong_direction(tracker, inferrer, history_
     assert data["windows"] == []
 
 
+@freeze_time(NOW)
 def test_predictions_windows_merges_overlapping(tracker, inferrer, history_db):
     """Two trains close together get merged into one window."""
     mock_rtt = MagicMock()
@@ -434,6 +443,7 @@ class TestSecurityHeaders:
 
 # ── Predictions/next endpoint ────────────────────────────────────────
 
+@freeze_time(NOW)
 class TestPredictionsNext:
 
     def test_no_rtt_returns_current_state(self, client):
@@ -586,6 +596,7 @@ def test_health_no_feed_has_warning(client):
     assert any("feed" in w.lower() or "no live data" in w.lower() for w in data["warnings"])
 
 
+@freeze_time(NOW)
 def test_health_with_rtt_rate_limited(tracker, inferrer, history_db):
     """When RTT is rate-limited, health shows warning and rtt.rate_limited=True."""
     from datetime import datetime, timezone, timedelta

@@ -5,8 +5,11 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 import requests
+from freezegun import freeze_time
 
 from src.rtt import RTTClient
+
+NOW = datetime(2026, 5, 15, 12, 0, 0, tzinfo=timezone.utc)
 
 
 @pytest.fixture
@@ -18,6 +21,7 @@ def rtt():
 
 # ── _ensure_token ────────────────────────────────────────────────────
 
+@freeze_time(NOW)
 class TestEnsureToken:
 
     def test_successful_token_fetch(self, rtt):
@@ -116,6 +120,7 @@ class TestEnsureToken:
 
 # ── _handle_rate_limit ───────────────────────────────────────────────
 
+@freeze_time(NOW)
 class TestHandleRateLimit:
 
     def test_sets_retry_after(self, rtt):
@@ -178,6 +183,7 @@ class TestHandleRateLimit:
 
 # ── _poll_station ────────────────────────────────────────────────────
 
+@freeze_time(NOW)
 class TestPollStation:
 
     def test_successful_poll_calls_process_service(self, rtt):
@@ -286,6 +292,7 @@ def _make_rtt_service(headcode="1A23", status="EXPECTED", platform="1",
     }
 
 
+@freeze_time(NOW)
 class TestGetUpcoming:
 
     def _setup_token(self, rtt):
@@ -622,6 +629,7 @@ class TestRTTClientInit:
 
 # ── Response caching ─────────────────────────────────────────────────
 
+@freeze_time(NOW)
 class TestFetchStationCache:
 
     def _setup_token(self, rtt):
