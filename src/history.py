@@ -1,5 +1,19 @@
 """
-Historical logger — stores every crossing state change and train passage in SQLite.
+Historical logger — stores predictor and signalling history in SQLite.
+
+Tables maintained here:
+  state_intervals    Crossing state runs (one row per OPEN/CLOSED span).
+  train_events       Per-train phase transitions (APPROACHING → ... → CLEARED).
+  train_passages     One row per completed train passage (summary).
+  raw_events         Catch-all for unstructured event payloads we may want
+                     to replay later (e.g. unusual TD/RTT message shapes).
+  predictions        Per-tick snapshot of the inferrer's output. Used to
+                     compare predictions against camera ground truth.
+  train_snapshots    Per-tick per-train rows joined to a `predictions` row
+                     by `tick_timestamp`.
+  route_intervals    Resolved SET → CLEAR runs per signalling route.
+  sf_events          Raw SF/SG signalling messages for area LA.
+  feedback           User feedback submissions from the web UI.
 """
 
 import logging
