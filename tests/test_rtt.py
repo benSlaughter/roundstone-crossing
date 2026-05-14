@@ -654,20 +654,5 @@ class TestFetchStationCache:
 
         assert result == new_data
 
-    def test_bypass_cache_forces_http_call(self, rtt):
-        self._setup_token(rtt)
-        cached_data = {"query": {"location": {"description": "Angmering"}}, "services": []}
-        rtt._cache["ANG"] = (cached_data, datetime.now(timezone.utc))
-
-        new_data = {"query": {"location": {"description": "Angmering"}}, "services": [{"fresh": True}]}
-        mock_resp = MagicMock()
-        mock_resp.status_code = 200
-        mock_resp.json.return_value = new_data
-
-        with patch("src.rtt.requests.get", return_value=mock_resp):
-            result = rtt._fetch_station("ANG", bypass_cache=True)
-
-        assert result == new_data
-
     def test_cache_default_ttl(self, rtt):
         assert rtt._cache_ttl == 60

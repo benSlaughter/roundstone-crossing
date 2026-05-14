@@ -128,15 +128,14 @@ class RTTClient:
             logger.error(f"RTT token refresh failed: {e}")
             return False
 
-    def _fetch_station(self, crs: str, *, bypass_cache: bool = False) -> dict | None:
+    def _fetch_station(self, crs: str) -> dict | None:
         """Fetch station data from RTT, with 60s response caching.
 
         Returns parsed JSON dict, or None on error/rate-limit/empty.
         """
         now = datetime.now(timezone.utc)
 
-        # Check cache first
-        if not bypass_cache and crs in self._cache:
+        if crs in self._cache:
             data, fetched_at = self._cache[crs]
             age = (now - fetched_at).total_seconds()
             if age < self._cache_ttl:
