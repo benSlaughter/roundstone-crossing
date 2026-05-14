@@ -4,10 +4,13 @@ Connects to NROD feeds, tracks trains, infers crossing state, serves API.
 """
 
 import argparse
+import hashlib
+import json
 import logging
 import os
 import sys
 import threading
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
@@ -15,7 +18,23 @@ from time import sleep
 
 import yaml
 
+from .feed import NRODFeed
+from .history import HistoryLogger
+from .inferrer import CrossingInferrer
+from .models import TrainPhase
+from .route_monitor import RouteMonitor
+from .rtt import RTTClient
+from .tracker import TrainTracker
+
 logger = logging.getLogger("crossing")
+
+# Sections of config.yaml that drive prediction. The hash of these sections
+# is logged with every predictions row for downstream provenance/analysis.
+# Kept narrow on purpose — see src/inferrer.py docstring on routes.
+PROVENANCE_CONFIG_KEYS = ("timing", "td")
+
+# How often the main loop wakes to recompute crossing state.
+MAIN_LOOP_TICK_SECS = 2
 
 
 def load_config() -> dict:
@@ -84,67 +103,80 @@ def validate_config(config: dict) -> None:
             "is no longer consumed by the inferrer. You can remove this key.")
 
 
-def run_predictor(config: dict, with_api: bool = False):
-    """Main loop: connect to feeds, track trains, infer state, log history."""
-    import hashlib
-    import json as _json
+@dataclass
+class _AppState:
+    """Wired-up predictor components shared by the main loop and API thread."""
+    config: dict
+    config_hash: str
+    tracker: TrainTracker
+    inferrer: CrossingInferrer
+    history: HistoryLogger
+    route_monitor: RouteMonitor
+    rtt: RTTClient
+    feed: NRODFeed
+    last_feed_time: datetime | None = None
 
-    from .tracker import TrainTracker
-    from .inferrer import CrossingInferrer
-    from .history import HistoryLogger
-    from .feed import NRODFeed
-    from .rtt import RTTClient
-    from .route_monitor import RouteMonitor
-    from .models import TrainPhase
 
-    tracker = TrainTracker(config)
-    inferrer = CrossingInferrer(config)
-    history = HistoryLogger()
-    route_monitor = RouteMonitor(config, history=history)
-    tracker.history = history
-
-    # Provenance: a short hash of the config sections that drive inference.
-    # Route data is not consumed by the inferrer (see src/inferrer.py
-    # docstring), so neither `routes` nor `inference` are included here —
-    # changing them must NOT split downstream prediction analysis.
-    inference_keys = ("timing", "td")
-    prov = {k: config.get(k) for k in inference_keys}
-    config_hash = hashlib.sha256(
-        _json.dumps(prov, sort_keys=True, default=str).encode("utf-8")
+def _compute_config_hash(config: dict) -> str:
+    prov = {k: config.get(k) for k in PROVENANCE_CONFIG_KEYS}
+    return hashlib.sha256(
+        json.dumps(prov, sort_keys=True, default=str).encode("utf-8")
     ).hexdigest()[:12]
+
+
+def _build_app_state(config: dict) -> _AppState:
+    """Construct and wire all predictor components."""
+    history = HistoryLogger()
+    tracker = TrainTracker(config)
+    tracker.history = history
+    inferrer = CrossingInferrer(config)
+    route_monitor = RouteMonitor(config, history=history)
+
+    config_hash = _compute_config_hash(config)
     logger.info(f"Config hash: {config_hash}")
 
-    last_feed_time = None
+    state = _AppState(
+        config=config, config_hash=config_hash, tracker=tracker,
+        inferrer=inferrer, history=history, route_monitor=route_monitor,
+        rtt=None,  # filled in below — needs the on-message callback
+        feed=None,
+    )
 
     def on_feed_message(ts: datetime):
-        nonlocal last_feed_time
-        last_feed_time = ts
+        state.last_feed_time = ts
 
-    feed = NRODFeed(tracker, history=history, route_monitor=route_monitor,
-                    on_message_callback=on_feed_message)
+    state.feed = NRODFeed(tracker, history=history, route_monitor=route_monitor,
+                          on_message_callback=on_feed_message)
 
-    # Start RTT polling
     rtt_config = config.get("rtt", {})
-    rtt_stations = rtt_config.get("stations", ["ANG", "GBS"])
-    rtt_interval = rtt_config.get("poll_interval", 15)
-    rtt = RTTClient(stations=rtt_stations, poll_interval=rtt_interval)
-    rtt.set_callback(lambda **kw: tracker.handle_rtt_update(**{
+    state.rtt = RTTClient(
+        stations=rtt_config.get("stations", ["ANG", "GBS"]),
+        poll_interval=rtt_config.get("poll_interval", 15),
+    )
+    state.rtt.set_callback(lambda **kw: tracker.handle_rtt_update(**{
         k: v for k, v in kw.items()
         if k in ("headcode", "station", "platform", "status", "origin_codes", "dest_codes")
     }))
-    rtt.set_active_check(lambda: len(tracker.trains) > 0)
-    rtt.start()
+    state.rtt.set_active_check(lambda: len(tracker.trains) > 0)
+    return state
 
-    # Start API server in background if requested
-    if with_api:
-        api_thread = threading.Thread(
-            target=_start_api, args=(config, tracker, inferrer, history, rtt, route_monitor), daemon=True
-        )
-        api_thread.start()
 
-    # Connect to NROD
+def _start_api_thread(state: _AppState) -> None:
+    api_thread = threading.Thread(
+        target=_start_api,
+        args=(state.config, state.tracker, state.inferrer, state.history,
+              state.rtt, state.route_monitor),
+        daemon=True,
+    )
+    api_thread.start()
+
+
+def _run_main_loop(state: _AppState) -> None:
+    """Block on the predictor tick loop until interrupted."""
+    state.rtt.start()
+
     logger.info("Roundstone Crossing Predictor starting...")
-    if not feed.start():
+    if not state.feed.start():
         logger.error("Failed to connect to NROD. Check credentials in .env")
         sys.exit(1)
 
@@ -153,59 +185,65 @@ def run_predictor(config: dict, with_api: bool = False):
 
     try:
         while True:
-            # Get active trains and route state, update crossing state
-            active = tracker.get_active_trains()
-            routes = route_monitor.active_route_names()
-            active_route_infos = route_monitor.active_routes()
-            status = inferrer.update(active, last_feed_time, routes)
+            active = state.tracker.get_active_trains()
+            routes = state.route_monitor.active_route_names()
+            active_route_infos = state.route_monitor.active_routes()
+            status = state.inferrer.update(active, state.last_feed_time, routes)
 
-            # Per-tick prediction snapshot (always logged, even if state unchanged)
             now = datetime.now(timezone.utc)
-            feed_age = ((now - last_feed_time).total_seconds()
-                        if last_feed_time else None)
+            feed_age = ((now - state.last_feed_time).total_seconds()
+                        if state.last_feed_time else None)
             try:
-                tick_ts = history.log_prediction(
+                tick_ts = state.history.log_prediction(
                     status,
                     feed_age_secs=feed_age,
                     active_routes=active_route_infos,
-                    config_hash=config_hash,
+                    config_hash=state.config_hash,
                 )
-                # Per-train snapshots aligned exactly to the prediction timestamp
-                history.log_train_snapshots(active, tick_timestamp=tick_ts)
+                state.history.log_train_snapshots(active, tick_timestamp=tick_ts)
             except Exception:
-                # Logging must never bring down the predictor
+                # Logging must never bring down the predictor.
                 logger.exception("Failed to log prediction snapshot")
 
-            # Log state changes
             if status.state != prev_state:
-                history.log_state_change(status)
+                state.history.log_state_change(status)
                 prev_state = status.state
 
-                # Print status to terminal
                 eta = status.seconds_until_change()
                 eta_str = f" (change in {eta:.0f}s)" if eta else ""
-                train_str = f" [{len(active)} train{'s' if len(active) != 1 else ''}]" if active else ""
+                train_str = (f" [{len(active)} train{'s' if len(active) != 1 else ''}]"
+                             if active else "")
                 logger.info(
                     f"State: {status.state.value.upper()}"
                     f" ({status.confidence:.0%}){train_str}{eta_str}"
                 )
 
-            # Log completed train passages (take lock for thread safety)
-            with tracker._lock:
-                for train in list(tracker.trains.values()):
+            with state.tracker._lock:
+                for train in list(state.tracker.trains.values()):
                     if train.phase == TrainPhase.CLEARED and not train._passage_logged:
-                        history.log_train_passage(train)
+                        state.history.log_train_passage(train)
                         train._passage_logged = True
 
-            sleep(2)  # Check every 2 seconds
+            sleep(MAIN_LOOP_TICK_SECS)
 
     except KeyboardInterrupt:
-        print("\nShutting down...")
         logger.info("Shutting down...")
     finally:
-        rtt.stop()
-        feed.stop()
+        state.rtt.stop()
+        state.feed.stop()
         logger.info("Stopped")
+
+
+def run_predictor(config: dict) -> None:
+    """Run the predictor without an HTTP API."""
+    _run_main_loop(_build_app_state(config))
+
+
+def run_predictor_with_api(config: dict) -> None:
+    """Run the predictor and serve the HTTP API in a background thread."""
+    state = _build_app_state(config)
+    _start_api_thread(state)
+    _run_main_loop(state)
 
 
 def _start_api(config: dict, tracker, inferrer, history, rtt_client=None, route_monitor=None):
@@ -270,7 +308,10 @@ def main():
 
     config = load_config()
     validate_config(config)
-    run_predictor(config, with_api=args.api)
+    if args.api:
+        run_predictor_with_api(config)
+    else:
+        run_predictor(config)
 
 
 if __name__ == "__main__":
