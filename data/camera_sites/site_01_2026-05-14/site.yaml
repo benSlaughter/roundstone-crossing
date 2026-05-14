@@ -1,0 +1,51 @@
+# Site metadata. Filled in after recording.
+
+site:
+  id: site_01
+  name: "South hedge"
+  recorded_at: "2026-05-14"
+  camera: "Ceyomur CY50"
+  interval_secs: 5
+
+position:
+  description: "Hedge south of the crossing"
+  approx_distance_m: 30
+  approx_height_m: 2
+  bearing: "45 degrees"
+  obstructions: []
+
+frame:
+  resolution: "1920x1080"
+  timestamp_overlay: true
+  camera_clock_offset_secs: 0   # camera_time - real_time (positive = camera ahead)
+
+# Time range of usable footage. The pipeline also auto-detects camera
+# disturbance (large frame variance) as a safety net.
+valid_range:
+  starts_at: "2026-05-14T08:54:55+01:00"
+  ends_at: "2026-05-14T15:26:00+01:00"
+  notes: "Last 2-3 frames of IMTL0004 are camera takedown (sky + face) — ignore"
+
+source_files:
+  - IMTL0003.avi   # 08:54:55 → 12:41:05 (3h 46min, 2715 frames)
+  - IMTL0004.avi   # 12:41:10 → 15:26:55 (2h 46min, 1990 frames; last few = takedown)
+
+# ROI (region-of-interest) pixel coordinates for 1920x1080 frames.
+# Format: [x, y, width, height] from top-left.
+# Wig-wag housings each contain TWO LEDs that alternate. Tight ROIs
+# (V2) chosen for highest signal-to-noise on the LED pixels;
+# wider barrier ROI (V3) covers the full horizontal arm when DOWN.
+roi:
+  wig_wag_left: [920, 330, 70, 35]      # central housing, both LEDs
+  wig_wag_right: [1510, 335, 70, 35]    # right housing, both LEDs
+  barrier_arm: [860, 430, 660, 50]      # full horizontal arm when DOWN
+  exclude_timestamp_bar: [0, 1040, 1920, 40]   # crop bottom info bar
+
+extras:
+  streetlight_visible: true
+  streetlight_note: "Tall pole at back of crossing carpark — could fool light sensor at night for future deployments"
+
+notes: |
+  First test deployment. Bright daytime throughout, no IR triggered.
+  Multiple closure events captured.
+

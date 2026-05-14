@@ -30,6 +30,8 @@
 
 ## 🔲 Next Up
 
+- [ ] **Restart blind spot** — After a process/container restart, in-memory tracker state is lost. Trains currently in our zone but not currently moving (e.g. dwelling at a station) are invisible until they next step or RTT picks them up. Replay recent `train_events` from the DB on startup to rebuild tracker state, OR use `train_snapshots` to restore the most recent active set.
+- [ ] **Nightly auto-restart cron** — Schedule a cron job on the server (around 01:00, in the no-train window) to pull the latest image and restart the container. Lets minor non-urgent fixes deploy automatically with no daytime disruption. Pairs well with the restart-blind-spot fix above so we don't lose any tracking on auto-restart.
 - [ ] **Custom error pages** — Styled 404, 500, etc. pages matching the site's dark theme
 - [ ] **Logo/branding** — Research AI tooling for creating a unique custom logo
 - [ ] **State-coverage metric** — Build a metric measuring "% of time predictor correctly says CLOSED during actual closures" so we can fairly evaluate route-based vs no-route inference. Required before re-enabling route inference.

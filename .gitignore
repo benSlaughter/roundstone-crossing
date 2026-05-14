@@ -19,9 +19,21 @@ htmlcov/
 # macOS
 .DS_Store
 
-# Runtime data (but track data/observations/)
-data/
+# Runtime data (but track data/observations/ and data/camera_sites/ metadata)
+data/*
 !data/observations/
+!data/camera_sites/
+
+# Within camera_sites: exclude raw video files, extracted frames,
+# detections.csv (large per-frame log), and validation artefacts
+# (manifest + JPGs are working data, not source-of-truth)
+data/camera_sites/**/*.avi
+data/camera_sites/**/*.mp4
+data/camera_sites/**/frames/
+data/camera_sites/**/validation/
+data/camera_sites/**/detections.csv
+data/camera_sites/**/quality.json
+data/camera_sites/**/quality_report.md
 
 # Log files
 logs/
