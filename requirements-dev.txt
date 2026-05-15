@@ -1,0 +1,16 @@
+# Development + test dependencies.
+#
+# Production deps come from requirements.txt — this file extends that
+# with the camera_analysis libraries used on dev machines and in CI to
+# exercise the offline footage-processing tests.
+#
+# The production Docker image still installs from requirements.txt only,
+# so these large libraries (numpy + OpenCV + PyAV total ~150 MB) do not
+# bloat the predictor image.
+-r requirements.txt
+
+# Camera analysis (experiments/camera_analysis/)
+numpy>=2.0.0
+opencv-python-headless>=4.10.0
+av>=14.0.0
+pytesseract>=0.3.13
