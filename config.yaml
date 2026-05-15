@@ -62,17 +62,15 @@ timing:
   # Used by inferrer to transition an APPROACHING train to CLOSING_PREDICTED, and to
   # compute the "predicted barriers close at" timestamp for the dashboard.
   #
-  # Observed route-SET → at-crossing median across 10 days production data: 212s
-  # (P25=150s, P75=331s). For MCB-CCTV the signaller must have lowered barriers
-  # AND verified CCTV BEFORE setting the route — so barriers are confirmed down
-  # ≥212s before train arrives at crossing (median).
-  #
-  # Old value (120s) appears to have been calibrated against a small observation
-  # sample and underestimates real barrier-lowering lead time.
-  #
-  # 180s is a moderate compromise — between P25 (150s) and the median (212s).
-  # Higher = earlier warning + more accurate predicted_change time, but greater
-  # risk of false positives when route never gets set (e.g. cancelled trains).
+  # Calibration evidence:
+  #   Source A: route-SET → at-crossing across 10 days production data
+  #             median 212s, P25 150s, P75 331s
+  #   Source B: barriers-down (camera) → at-crossing across 77 trains on 2026-05-14
+  #             median 216s, P25 113s, P75 338s, mean 235s, stdev 141s
+  # The two sources agree to within 5% on median and P75, validating the
+  # underlying assumption. 180s is a moderate compromise — between P25 and
+  # the median — that under-warns ~44% of trains by camera measurement
+  # but keeps false-positive risk low when routes/trains get cancelled.
   pre_closure_secs: 180
   
   # How long after the train clears does it take for barriers to raise?
