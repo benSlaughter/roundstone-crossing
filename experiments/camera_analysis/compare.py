@@ -81,42 +81,51 @@ def compare_to_predictions(camera_closures: list[dict], site_cfg: dict,
         if (last_ts - run_start).total_seconds() >= MIN_RUN_SECS:
             pred_closures.append((run_start, last_ts))
 
-    # Match: greedy 1:1 — each predictor matched at most once, paired
-    # to the closest still-unmatched camera closure within ±600s. We
-    # build all candidate (camera, predictor) pairs, sort by absolute
-    # time difference, and take pairs in order skipping any whose
-    # camera or predictor is already used. This avoids the inflated
-    # "matched" count we get when several split camera closures all
-    # claim the same predictor closure as their neighbour.
-    candidates = []
-    for ci, c in enumerate(camera_closures):
-        cam_start = datetime.fromisoformat(c["started_at"]).astimezone(timezone.utc)
-        for pi, (ps, pe) in enumerate(pred_closures):
-            diff = (ps - cam_start).total_seconds()
-            if abs(diff) > 600:
-                continue
-            candidates.append((abs(diff), diff, ci, pi))
-    candidates.sort(key=lambda x: x[0])
+    # Match by interval OVERLAP (with a small tolerance), not by start-time
+    # proximity. The earlier greedy-by-start-time approach paired each
+    # camera closure to the nearest predictor START — but a long predictor
+    # CLOSED_INFERRED span that bridges several back-to-back trains is
+    # ONE event from the predictor's perspective and MULTIPLE events from
+    # the camera's. Overlap matching correctly counts that as "all camera
+    # events matched, predictor was right the whole time" instead of
+    # "predictor missed N-1 closures".
+    #
+    # Two intervals match if their (interval ± OVERLAP_TOLERANCE_SECS)
+    # boxes intersect. A single predictor interval may match multiple
+    # camera intervals and vice-versa.
+    OVERLAP_TOLERANCE_SECS = 60
 
-    cam_to_pred: dict[int, tuple[int, float]] = {}
-    used_cam: set[int] = set()
-    used_pred: set[int] = set()
-    for _, diff, ci, pi in candidates:
-        if ci in used_cam or pi in used_pred:
-            continue
-        cam_to_pred[ci] = (pi, diff)
-        used_cam.add(ci)
-        used_pred.add(pi)
+    def _overlaps(a_start, a_end, b_start, b_end) -> bool:
+        if a_end is None:
+            a_end = a_start + timedelta(seconds=300)
+        if b_end is None:
+            b_end = b_start + timedelta(seconds=300)
+        pad = timedelta(seconds=OVERLAP_TOLERANCE_SECS)
+        return not (a_end + pad < b_start or b_end + pad < a_start)
 
     matches = []
-    for ci, c in enumerate(camera_closures):
-        if ci in cam_to_pred:
-            pi, diff = cam_to_pred[ci]
+    matched_pred_indices: set[int] = set()
+    for c in camera_closures:
+        cam_start = datetime.fromisoformat(c["started_at"]).astimezone(timezone.utc)
+        cam_end = (datetime.fromisoformat(c["ended_at"]).astimezone(timezone.utc)
+                   if c.get("ended_at") else None)
+
+        # First overlapping predictor interval wins for the timing-diff
+        # column; all overlapping intervals are marked "matched".
+        first_match_idx: int | None = None
+        for pi, (ps, pe) in enumerate(pred_closures):
+            if _overlaps(cam_start, cam_end, ps, pe):
+                matched_pred_indices.add(pi)
+                if first_match_idx is None:
+                    first_match_idx = pi
+
+        if first_match_idx is not None:
+            ps = pred_closures[first_match_idx][0]
             matches.append({
                 "camera_start": c["started_at"],
                 "camera_end": c["ended_at"],
-                "predictor_first_close": pred_closures[pi][0].isoformat(),
-                "lead_secs": diff,
+                "predictor_first_close": ps.isoformat(),
+                "lead_secs": (ps - cam_start).total_seconds(),
             })
         else:
             matches.append({
@@ -126,12 +135,12 @@ def compare_to_predictions(camera_closures: list[dict], site_cfg: dict,
                 "lead_secs": None,
             })
 
-    matched = len(used_cam)
+    matched_cam_count = sum(1 for m in matches if m["predictor_first_close"])
     return {
         "status": "ok",
         "predictor_closures": len(pred_closures),
-        "matched": matched,
-        "camera_only": len(camera_closures) - matched,
-        "predictor_only": len(pred_closures) - len(used_pred),
+        "matched": matched_cam_count,
+        "camera_only": len(camera_closures) - matched_cam_count,
+        "predictor_only": len(pred_closures) - len(matched_pred_indices),
         "matches": matches,
     }
