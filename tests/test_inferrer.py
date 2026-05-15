@@ -332,6 +332,41 @@ class TestBarriersStayClosedForConsecutiveTrains:
         # Should stay CLOSED — barriers wouldn't open and reclose
         assert status.state == CrossingState.CLOSED_INFERRED
 
+    def test_closed_releases_when_only_far_approaching_train_left(self, inferrer, make_train):
+        """After last train clears, a far-approaching train (well beyond pre_closure)
+        should NOT keep barriers down — there's plenty of time for them to raise
+        and re-close before that train arrives. Regression test for the linger
+        bug discovered via camera ground truth (see commit message)."""
+        at_crossing = make_train(headcode="1A00", phase=TrainPhase.AT_CROSSING)
+        inferrer.update([at_crossing], FEED_RECENT)
+        assert inferrer.status.state == CrossingState.CLOSED_INFERRED
+
+        # pre_closure_secs in test_config = 120, so 600s is well outside
+        far = make_train(
+            headcode="2B00",
+            phase=TrainPhase.APPROACHING,
+            predicted_at_crossing=NOW + timedelta(seconds=600),
+        )
+        status = inferrer.update([far], FEED_RECENT)
+        # Should NOT stay CLOSED — falls through to the OPEN branch since
+        # the approaching train is outside pre_closure window
+        assert status.state == CrossingState.OPEN
+
+    def test_closed_releases_when_approaching_has_no_eta(self, inferrer, make_train):
+        """Approaching train without a predicted_at_crossing time also doesn't
+        hold barriers down — we have no signal it's imminent."""
+        at_crossing = make_train(headcode="1A00", phase=TrainPhase.AT_CROSSING)
+        inferrer.update([at_crossing], FEED_RECENT)
+        assert inferrer.status.state == CrossingState.CLOSED_INFERRED
+
+        no_eta = make_train(
+            headcode="2B00",
+            phase=TrainPhase.APPROACHING,
+            predicted_at_crossing=None,
+        )
+        status = inferrer.update([no_eta], FEED_RECENT)
+        assert status.state == CrossingState.OPEN
+
 
 
 @freeze_time(NOW)

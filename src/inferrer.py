@@ -98,8 +98,13 @@ class CrossingInferrer:
             self.status.predicted_change = self._predict_opening(active_trains)
             self.status.predicted_next_state = CrossingState.OPENING_PREDICTED
 
-        elif was_closed:
-            # Barriers already down — keep them down while trains remain active
+        elif was_closed and self._has_train_holding_barriers(active_trains, now):
+            # Barriers held closed by an imminent or at-the-crossing train.
+            # Approaching trains beyond `pre_closure_secs` away no longer
+            # count — they're tomorrow's closure, not the current one. This
+            # stops the predictor from staying CLOSED for minutes after the
+            # last train cleared just because a far-future train was
+            # tracked in the approach zone.
             train_count = len(active_trains)
             self._transition(
                 CrossingState.CLOSED_INFERRED, confidence=0.85,
@@ -192,6 +197,36 @@ class CrossingInferrer:
         if not candidates:
             return None
         return min(candidates, key=lambda t: t.predicted_at_crossing)
+
+    def _has_train_holding_barriers(self, trains: list[TrackedTrain],
+                                    now: datetime) -> bool:
+        """True if at least one train justifies keeping barriers down right now.
+
+        A train holds the barriers down if it is:
+          * AT_CROSSING — physically on the crossing
+          * STRIKE_IN — past the strike-in signal; under MCB-CCTV the
+            signaller must have lowered barriers before this
+          * AT_STATION — train dwelling at a platform that may itself be
+            at the crossing (e.g. Angmering down) or imminently leaving
+          * APPROACHING with a predicted at-crossing time within
+            `pre_closure_secs` from now — close enough that barriers
+            would not raise and re-close in time
+
+        An APPROACHING train more than `pre_closure_secs` away does NOT
+        count: barriers physically have time to raise and re-close
+        before that train reaches the crossing, and the camera-ground-
+        truth analysis (2026-05-14) shows they typically do.
+        """
+        pre_closure = self._timing.get("pre_closure_secs", 120)
+        for t in trains:
+            if t.phase in (TrainPhase.AT_CROSSING, TrainPhase.STRIKE_IN,
+                           TrainPhase.AT_STATION):
+                return True
+            if t.phase == TrainPhase.APPROACHING and t.predicted_at_crossing:
+                secs_until = (t.predicted_at_crossing - now).total_seconds()
+                if secs_until <= pre_closure:
+                    return True
+        return False
 
     def _predict_opening(self, trains: list[TrackedTrain]) -> datetime | None:
         """Predict when barriers will open based on closure window merging.
