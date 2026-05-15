@@ -10,10 +10,20 @@ detection. The fix is twofold:
 
 These tests synthesise small BGR frames with known pixel content and
 verify the detector's response to each scenario.
+
+The camera_analysis module relies on numpy + OpenCV + PyAV which are
+not in the predictor's requirements.txt (they only run on dev machines
+where the analyst processes recorded footage). Skip the whole module
+when those deps aren't installed so CI doesn't fail on the predictor's
+slim production image.
 """
 
-import numpy as np
 import pytest
+
+pytest.importorskip("numpy")
+pytest.importorskip("cv2")
+
+import numpy as np
 
 from experiments.camera_analysis.detect import (
     State,

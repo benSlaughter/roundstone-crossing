@@ -4,11 +4,21 @@
 closure events with three filters: pre-filter brief blips, merge nearby
 events, drop sub-threshold final events. Validated against site_01
 2026-05-14 footage where the user manually classified each event.
+
+The camera_analysis module relies on numpy + OpenCV + PyAV which are
+not in the predictor's requirements.txt (they only run on dev machines
+where the analyst processes recorded footage). Skip the whole module
+when those deps aren't installed so CI doesn't fail on the predictor's
+slim production image.
 """
 
 from datetime import datetime, timedelta, timezone
 
 import pytest
+
+pytest.importorskip("numpy")
+pytest.importorskip("cv2")
+pytest.importorskip("av")
 
 from experiments.camera_analysis.pipeline import _find_closure_events
 
